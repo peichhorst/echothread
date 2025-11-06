@@ -5,8 +5,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Waves, Sparkles, Loader2, X as CloseIcon } from "lucide-react"
 import { motion } from "framer-motion"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
+
+const INITIAL_BATCH = 5
+const SNIPPET_LIMIT = 500
+
+const truncate = (text: string) =>
+  text.length > SNIPPET_LIMIT ? `${text.slice(0, SNIPPET_LIMIT)}…` : text
 
 export default function App() {
   const [echoCount, setEchoCount] = useState(0)
@@ -15,6 +21,8 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [customQuery, setCustomQuery] = useState("")
   const [lastQuery, setLastQuery] = useState<string | null>(null)
+  const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
+  const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
 
   const editor = useEditor({
     extensions: [
@@ -28,10 +36,27 @@ export default function App() {
     editorProps: {
       attributes: {
         class:
-          "prose prose-invert max-w-none focus:outline-none min-h-[60vh] text-base lg:text-lg",
+          "prose prose-invert max-w-none focus:outline-none min-h-[200px] max-h-[260px] overflow-auto text-base lg:text-lg",
       },
     },
   })
+
+  useEffect(() => {
+    setVisibleNewsCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+    setVisibleJobCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+  }, [echoes])
 
   const computeContextQuery = () => {
     if (!editor) return null
@@ -60,7 +85,7 @@ export default function App() {
     try {
       const insight = await buildEchoInsight(trimmed)
       if (!insight) {
-        setFeedback("No live signals right now. Give it another shot in a few seconds.")
+        setFeedback("No live signals returned. Try a broader search or check your API keys.")
         return false
       }
 
@@ -69,8 +94,10 @@ export default function App() {
       setLastQuery(trimmed)
       return true
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error"
       console.error("Echo fetch failed", error)
-      setFeedback("We hit a snag fetching live data. Please try again shortly.")
+      setFeedback(`Live data request failed: ${message}`)
       return false
     } finally {
       setIsFetching(false)
@@ -105,6 +132,18 @@ export default function App() {
     await runEcho(query)
   }
 
+  const loadMoreNews = (id: string) =>
+    setVisibleNewsCounts((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+    }))
+
+  const loadMoreJobs = (id: string) =>
+    setVisibleJobCounts((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+    }))
+
   const contextQueryPreview = computeContextQuery()
 
   return (
@@ -120,7 +159,7 @@ export default function App() {
                 </h1>
               </div>
               <p className="mt-4 text-lg text-white/80 max-w-2xl">
-                Highlight anything you've written and we'll surface the freshest social, news, and market signals that reference it.
+                Highlight anything you've written and we'll surface the freshest social, news, and jobs that reference it.
               </p>
             </div>
             <div className="rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-6 py-5 text-center">
@@ -130,7 +169,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="grid gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start">
+        <div className="space-y-10">
           <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl overflow-hidden">
             <div className="px-8 py-6 border-b border-white/10">
               <h2 className="text-2xl font-semibold">Editor canvas</h2>
@@ -138,101 +177,200 @@ export default function App() {
                 Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
               </p>
             </div>
-            <div className="p-6 sm:p-8">
+            <div className="p-6 sm:p-8 space-y-5">
               <EditorContent editor={editor} />
+              <details className="rounded-2xl border border-white/10 bg-white/5 text-white/80">
+                <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                  Custom echo controls
+                </summary>
+                <div className="px-4 sm:px-6 py-4 space-y-4">
+                  <p className="text-xs text-white/60">
+                    Prefer to query something other than the highlighted text? Drop it here or re-run your last echo instantly.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Input
+                      value={customQuery}
+                      onChange={(event) => setCustomQuery(event.target.value)}
+                      placeholder="Type a keyword, ticker, or phrase..."
+                      disabled={isFetching}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleCustomEcho}
+                      disabled={isFetching}
+                    >
+                      Custom echo
+                    </Button>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={handleInstantEcho}
+                      disabled={isFetching || (!lastQuery && !contextQueryPreview)}
+                      className="justify-start sm:justify-center"
+                    >
+                      Instant echo
+                    </Button>
+                    <p className="text-xs text-white/50">
+                      {lastQuery
+                        ? `Last echo: "${lastQuery}"`
+                        : "We reuse your latest selection or the current paragraph if nothing is highlighted."}
+                    </p>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
 
-          <aside className="space-y-6">
-            {feedback && (
-              <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/15 text-yellow-100 px-4 py-3 text-sm">
-                {feedback}
-              </div>
-            )}
-
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl space-y-4">
-              <div>
-                <p className="text-sm font-semibold text-white/80 uppercase tracking-wide">
-                  Custom echo
-                </p>
-                <p className="text-xs text-white/60 mt-1">
-                  Prefer to query something other than the highlighted text? Drop it here or re-run your last echo instantly.
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Input
-                  value={customQuery}
-                  onChange={(event) => setCustomQuery(event.target.value)}
-                  placeholder="Type a keyword, ticker, or phrase..."
-                  disabled={isFetching}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleCustomEcho}
-                  disabled={isFetching}
-                >
-                  Custom echo
-                </Button>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={handleInstantEcho}
-                  disabled={isFetching || (!lastQuery && !contextQueryPreview)}
-                  className="justify-start sm:justify-center"
-                >
-                  Instant echo
-                </Button>
-                <p className="text-xs text-white/50">
-                  {lastQuery
-                    ? `Last echo: "${lastQuery}"`
-                    : "We reuse your latest selection or the current paragraph if nothing is highlighted."}
-                </p>
-              </div>
+          {feedback && (
+            <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/15 text-yellow-100 px-4 py-3 text-sm">
+              {feedback}
             </div>
+          )}
 
-            {echoes.length === 0 ? (
-              <div className="rounded-3xl border border-white/10 bg-white/5 text-white/80 p-8 leading-relaxed shadow-2xl">
-                Highlight any text in the editor and press the wave button. The live feed will populate with signal cards pulling directly from your configured APIs.
-              </div>
-            ) : (
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
-                {echoes.map((echo) => (
-                  <article
-                    key={echo.id}
-                    className="rounded-3xl border border-purple-500/40 bg-purple-900/40 backdrop-blur-md shadow-2xl p-6 flex flex-col gap-4 relative"
+          {echoes.length === 0 ? (
+            <div className="rounded-3xl border border-white/10 bg-white/5 text-white/80 p-8 leading-relaxed shadow-2xl">
+              Highlight any text in the editor and press the wave button. The live feed will populate with signal cards pulling directly from your configured APIs.
+            </div>
+          ) : (
+            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+              {echoes.map((echo) => (
+                <article
+                  key={echo.id}
+                  className="rounded-3xl border border-purple-500/40 bg-purple-900/40 backdrop-blur-md shadow-2xl p-6 flex flex-col gap-4 relative"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEchoes((prev) => prev.filter((item) => item.id !== echo.id))
+                    }
+                    className="absolute top-4 right-4 rounded-full border border-purple-300/30 bg-purple-900/60 p-1 text-purple-200 hover:bg-purple-800 hover:text-white transition"
+                    aria-label="Remove echo card"
                   >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEchoes((prev) => prev.filter((item) => item.id !== echo.id))
-                      }
-                      className="absolute top-4 right-4 rounded-full border border-purple-300/30 bg-purple-900/60 p-1 text-purple-200 hover:bg-purple-800 hover:text-white transition"
-                      aria-label="Remove echo card"
-                    >
-                      <CloseIcon className="w-4 h-4" />
-                    </button>
+                    <CloseIcon className="w-4 h-4" />
+                  </button>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs text-purple-200/60">
+                      {new Date(echo.timestamp).toLocaleString()}
+                    </p>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-purple-200/70">Echo request</p>
                       <h3 className="text-xl font-bold text-purple-50 mt-1">
                         "{echo.selection}"
                       </h3>
                     </div>
-                    <div className="space-y-3 text-purple-50/90 text-sm leading-relaxed">
+                  </div>
+                  <div className="space-y-4 text-purple-50/90 text-sm leading-relaxed">
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        Reddit
+                      </h4>
                       <p>{echo.tweetSummary}</p>
+                    </section>
+
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        News
+                      </h4>
                       <p>{echo.newsSummary}</p>
+                      {echo.newsItems.length > 0 && (
+                        <div className="space-y-2">
+                          {echo.newsItems
+                            .slice(0, visibleNewsCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((item) => (
+                              <article
+                                key={item.id}
+                                className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-2"
+                              >
+                                <a
+                                  href={item.link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-purple-50 hover:text-white transition"
+                                >
+                                  {item.title}
+                                </a>
+                                <p className="text-xs text-purple-200/70">{item.source}</p>
+                                <p className="text-xs text-purple-200/80 whitespace-pre-line leading-relaxed">
+                                  {truncate(item.snippet)}
+                                </p>
+                              </article>
+                            ))}
+                          {echo.newsItems.length > (visibleNewsCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreNews(echo.id)}
+                            >
+                              Read more news
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        Jobs
+                      </h4>
+                      <p>{echo.jobSummary}</p>
+                    {echo.jobItems.length > 0 && (
+                      <div className="space-y-2">
+                          {echo.jobItems
+                            .slice(0, visibleJobCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((job) => (
+                              <article
+                                key={job.id}
+                                className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-2"
+                              >
+                                <a
+                                  href={job.applyLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-purple-50 hover:text-white transition"
+                                >
+                                  {job.title}
+                                </a>
+                                <p className="text-xs text-purple-200/70">
+                                  {job.employer}
+                                  {job.location ? ` • ${job.location}` : ""}
+                                  {job.postedAt
+                                    ? ` • ${new Date(job.postedAt).toLocaleDateString()}`
+                                    : ""}
+                                  {job.employmentType ? ` • ${job.employmentType}` : ""}
+                                </p>
+                                <p className="text-xs text-purple-200/80 whitespace-pre-line leading-relaxed">
+                                  {truncate(job.description)}
+                                </p>
+                              </article>
+                            ))}
+                          {echo.jobItems.length > (visibleJobCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreJobs(echo.id)}
+                            >
+                              Read more jobs
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    <section>
                       <p>{echo.marketSummary}</p>
-                    </div>
-                    <p className="text-xs text-purple-200/60 mt-auto">
-                      {new Date(echo.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            )}
-          </aside>
+                    </section>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
