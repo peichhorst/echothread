@@ -21,6 +21,7 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [customQuery, setCustomQuery] = useState("")
   const [lastQuery, setLastQuery] = useState<string | null>(null)
+  const [visibleRedditCounts, setVisibleRedditCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
 
@@ -42,6 +43,13 @@ export default function App() {
   })
 
   useEffect(() => {
+    setVisibleRedditCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
     setVisibleNewsCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
@@ -132,6 +140,12 @@ export default function App() {
     await runEcho(query)
   }
 
+  const loadMoreReddit = (id: string) =>
+    setVisibleRedditCounts((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+    }))
+
   const loadMoreNews = (id: string) =>
     setVisibleNewsCounts((prev) => ({
       ...prev,
@@ -148,34 +162,53 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950 text-white">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 pt-20 pb-32 space-y-12">
-        <header className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg p-10 shadow-2xl">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-5">
-                <Sparkles className="w-16 h-16 text-yellow-400 animate-pulse" />
-                <h1 className="text-5xl sm:text-6xl font-black tracking-tight">
-                  EchoThread
-                </h1>
-              </div>
-              <p className="mt-4 text-lg text-white/80 max-w-2xl">
-                Highlight anything you've written and we'll surface the freshest social, news, and jobs that reference it.
-              </p>
+      <header className="sticky top-0 z-50 bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950/95 border-b border-white/10 shadow-2xl">
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-6 grid gap-6 lg:grid-cols-3 items-start">
+          <div className="space-y-3">
+            <div className="flex items-center gap-5">
+              <Sparkles className="w-16 h-16 text-yellow-400 animate-pulse" />
+              <h1 className="text-5xl sm:text-6xl font-black tracking-tight">
+                EchoThread
+              </h1>
             </div>
-            <div className="rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-6 py-5 text-center">
-              <p className="text-sm uppercase tracking-wide text-yellow-200/80">Echoes triggered</p>
-              <p className="text-4xl font-bold text-yellow-300">{echoCount}</p>
-            </div>
+            <p className="text-lg text-white/80 max-w-2xl">
+              Highlight anything you've written and we'll surface the freshest social, news, and jobs that reference it.
+            </p>
           </div>
-        </header>
+          <div className="rounded-2xl border border-yellow-400/40 bg-yellow-500/10 px-6 py-5 text-center">
+            <p className="text-sm uppercase tracking-wide text-yellow-200/80">Echoes triggered</p>
+            <p className="text-4xl font-bold text-yellow-300">{echoCount}</p>
+          </div>
+          <motion.div
+            initial={{ scale: 0, rotate: -360 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            className="flex justify-center lg:justify-end"
+          >
+            <Button
+              onClick={handleEcho}
+              disabled={isFetching}
+              className="rounded-full w-24 h-24 lg:w-28 lg:h-28 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-4xl font-black flex items-center justify-center disabled:opacity-70"
+            >
+              {isFetching ? (
+                <Loader2 className="w-10 h-10 lg:w-12 lg:h-12 animate-spin" />
+              ) : (
+                <Waves className="w-12 h-12 lg:w-14 lg:h-14" />
+              )}
+            </Button>
+          </motion.div>
+        </div>
+      </header>
 
-        <div className="space-y-10">
-          <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl overflow-hidden">
-            <div className="px-8 py-6 border-b border-white/10">
-              <h2 className="text-2xl font-semibold">Editor canvas</h2>
-              <p className="text-sm text-white/70 mt-1">
-                Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
-              </p>
+      <main className="max-w-6xl mx-auto px-6 lg:px-10 pt-28 pb-32 space-y-12">
+        <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl overflow-hidden">
+          <div className="px-6 lg:px-8 py-6 border-b border-white/10 space-y-4">
+              <div>
+                <h2 className="text-2xl font-semibold">Editor canvas</h2>
+                <p className="text-sm text-white/70 mt-1">
+                  Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
+                </p>
+              </div>
             </div>
             <div className="p-6 sm:p-8 space-y-5">
               <EditorContent editor={editor} />
@@ -232,7 +265,7 @@ export default function App() {
 
           {echoes.length === 0 ? (
             <div className="rounded-3xl border border-white/10 bg-white/5 text-white/80 p-8 leading-relaxed shadow-2xl">
-              Highlight any text in the editor and press the wave button. The live feed will populate with signal cards pulling directly from your configured APIs.
+              &copy; Peter Eichhorst
             </div>
           ) : (
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
@@ -268,6 +301,51 @@ export default function App() {
                         Reddit
                       </h4>
                       <p>{echo.tweetSummary}</p>
+                      {echo.redditItems.length > 0 && (
+                        <div className="space-y-2">
+                          {echo.redditItems
+                            .slice(0, visibleRedditCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((item) => (
+                              <article
+                                key={item.id}
+                                className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
+                              >
+                                <a
+                                  href={
+                                    item.url ||
+                                    (item.permalink
+                                      ? `https://reddit.com${item.permalink}`
+                                      : "#")
+                                  }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-purple-50 hover:text-white transition"
+                                >
+                                  {item.title}
+                                </a>
+                                <p className="text-[11px] uppercase tracking-wide text-purple-200/60">
+                                  {item.subreddit ? `r/${item.subreddit}` : "Reddit"} •{" "}
+                                  {item.author}
+                                </p>
+                                <p className="text-xs text-purple-200/80 whitespace-pre-line leading-relaxed">
+                                  {truncate(item.selftext)}
+                                </p>
+                              </article>
+                            ))}
+                          {echo.redditItems.length >
+                            (visibleRedditCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreReddit(echo.id)}
+                            >
+                              Read more Reddit posts
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </section>
 
                     <section className="space-y-2">
@@ -371,27 +449,8 @@ export default function App() {
               ))}
             </div>
           )}
-        </div>
-      </div>
+      </main>
 
-      <motion.div
-        initial={{ scale: 0, rotate: -360 }}
-        animate={{ scale: 1, rotate: 0 }}
-        transition={{ type: "spring", stiffness: 260, damping: 20 }}
-        className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 z-50"
-      >
-        <Button
-          onClick={handleEcho}
-          disabled={isFetching}
-          className="rounded-full w-32 h-32 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-6xl font-black flex items-center justify-center disabled:opacity-70"
-        >
-          {isFetching ? (
-            <Loader2 className="w-16 h-16 animate-spin" />
-          ) : (
-            <Waves className="w-20 h-20" />
-          )}
-        </Button>
-      </motion.div>
     </div>
   )
 }

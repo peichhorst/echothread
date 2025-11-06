@@ -200,6 +200,18 @@ export type EchoInsight = {
   id: string
   selection: string
   tweetSummary: string
+  redditItems: Array<{
+    id: string
+    title: string
+    author: string
+    subreddit: string
+    permalink: string
+    url: string
+    createdAt: number
+    score: number
+    commentCount: number
+    selftext: string
+  }>
   newsSummary: string
   marketSummary: string
   jobSummary: string
@@ -273,6 +285,19 @@ export async function buildEchoInsight(
       source: item?.source?.trim() || "Unknown source",
     }))
 
+  const redditItems = tweets.map((post, index) => ({
+    id: post.id || `${selection}-reddit-${index}`,
+    title: post.title?.trim() || "Untitled post",
+    author: post.author || "unknown",
+    subreddit: post.subreddit || "",
+    permalink: post.permalink || post.url || "",
+    url: post.url || post.permalink || "",
+    createdAt: post.created_utc ?? 0,
+    score: post.score ?? 0,
+    commentCount: post.num_comments ?? 0,
+    selftext: post.selftext?.trim() || "",
+  }))
+
   const jobItems = jobs.map((job, index) => ({
     id: job.job_id || job.job_apply_link || `${selection}-job-${index}`,
     title: job.job_title || "Untitled role",
@@ -288,6 +313,7 @@ export async function buildEchoInsight(
     id: `echo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     selection: cleanSelection,
     tweetSummary,
+    redditItems,
     newsSummary,
     marketSummary,
     jobSummary,
