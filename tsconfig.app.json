@@ -4,7 +4,14 @@
     "useDefineForClassFields": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
+    "baseUrl": ".",
     "skipLibCheck": true,
+
+
+
+"forceConsistentCasingInFileNames": true,
+
+    
 
     /* Bundler mode */
     "moduleResolution": "Bundler",
@@ -23,9 +30,10 @@
 
     /* Paths */
     "paths": {
-      "app/*": ["src/app/*"],
-      "components/*": ["src/components/*"],
-      "hooks/*": ["src/hooks/*"]
+      "@/*": ["./src/*"],
+      "app/*": ["src/App/*"],
+      "components/*": ["./src/components/*"],
+      "hooks/*": ["./src/hooks/*"]
     }
   },
   "include": ["src"]
