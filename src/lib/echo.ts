@@ -196,6 +196,30 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   }
 }
 
+const IMAGE_EXTENSIONS = [
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".svg",
+  ".heic",
+  ".heif",
+]
+
+const isImageUrl = (value?: string | null) => {
+  const trimmed = value?.trim()
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return false
+  try {
+    const url = new URL(trimmed)
+    const lowerPath = url.pathname.toLowerCase()
+    return IMAGE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))
+  } catch {
+    return false
+  }
+}
+
 export type EchoInsight = {
   id: string
   selection: string
@@ -249,15 +273,10 @@ export async function buildEchoInsight(
   const news = payload.google?.organic ?? []
   const jobs = payload.jobs ?? []
 
-  const firstTweetText = tweets.find((item) => item?.title || item?.selftext)
-  const firstSnippet =
-    firstTweetText?.selftext?.trim() ||
-    firstTweetText?.title?.trim() ||
-    ""
   const tweetSummary = fallbackLine(
     "Reddit",
     tweets.length
-      ? `${tweets.length} new Reddit posts - "${firstSnippet.slice(0, 120) || "No snippet"}"`
+      ? `${tweets.length} new Reddit posts streaming in.`
       : ""
   )
 
@@ -285,18 +304,26 @@ export async function buildEchoInsight(
       source: item?.source?.trim() || "Unknown source",
     }))
 
-  const redditItems = tweets.map((post, index) => ({
-    id: post.id || `${selection}-reddit-${index}`,
-    title: post.title?.trim() || "Untitled post",
-    author: post.author || "unknown",
-    subreddit: post.subreddit || "",
-    permalink: post.permalink || post.url || "",
-    url: post.url || post.permalink || "",
-    createdAt: post.created_utc ?? 0,
-    score: post.score ?? 0,
-    commentCount: post.num_comments ?? 0,
-    selftext: post.selftext?.trim() || "",
-  }))
+  const redditItems = tweets.map((post, index) => {
+    const permalink = post.permalink || ""
+    const externalUrl = post.url?.trim()
+    const safeExternalUrl =
+      externalUrl && !isImageUrl(externalUrl) ? externalUrl : ""
+    const rawSelftext = post.selftext?.trim() || ""
+
+    return {
+      id: post.id || `${selection}-reddit-${index}`,
+      title: post.title?.trim() || "Untitled post",
+      author: post.author || "unknown",
+      subreddit: post.subreddit || "",
+      permalink,
+      url: safeExternalUrl,
+      createdAt: post.created_utc ?? 0,
+      score: post.score ?? 0,
+      commentCount: post.num_comments ?? 0,
+      selftext: isImageUrl(rawSelftext) ? "" : rawSelftext,
+    }
+  })
 
   const jobItems = jobs.map((job, index) => ({
     id: job.job_id || job.job_apply_link || `${selection}-job-${index}`,
