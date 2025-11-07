@@ -2,7 +2,7 @@
 
 
 export const config = {
-  runtime: "nodejs20.x",
+  runtime: "nodejs",
 }
 
 type VercelRequest = {
