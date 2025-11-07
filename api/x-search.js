@@ -33,51 +33,84 @@ export default async function handler(req, res) {
   if (!query) return res.status(400).json({ error: 'Missing ?q=...' });
 
   const apiKey = process.env.JINA_API_KEY;
-  if (!apiKey) {
-    console.error('[X proxy] Missing JINA_API_KEY');
-    return res.status(200).json({
-      data: buildFallbackPosts(query),
-      meta: { fallback: true, message: 'Missing JINA_API_KEY' },
-    });
-  }
 
-  try {
-    const response = await fetch('https://jsearch.jina.ai/v1/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'User-Agent': 'echothread-proxy/1.0',
-      },
-      body: JSON.stringify({
-        query,
-        source: 'x',
-        limit: 10,
-        reasoning: false,
-      }),
-    });
-
-    const text = await response.text();
-    if (!response.ok) throw new Error(`JSearch failed: ${response.status}`);
-
-    let payload;
+  // === 1. TRY JSEARCH (PRIMARY) ===
+  if (apiKey) {
     try {
-      payload = JSON.parse(text);
-    } catch {
-      throw new Error('Invalid JSON from JSearch');
+      const response = await fetch('https://jsearch.jina.ai/v1/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'User-Agent': 'echothread-proxy/1.0',
+        },
+        body: JSON.stringify({
+          query,
+          source: 'x',
+          limit: 10,
+          reasoning: false,
+        }),
+      });
+
+      const text = await response.text();
+      if (response.ok) {
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          throw new Error('Invalid JSON from JSearch');
+        }
+        const data = Array.isArray(payload?.data) ? payload.data : [];
+        return res.status(200).json({ data });
+      }
+    } catch (error) {
+      console.warn('[X proxy] JSearch failed, trying RSS backup:', error.message);
     }
-
-    const data = Array.isArray(payload?.data) ? payload.data : [];
-
-    return res.status(200).json({ data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[X proxy] ERROR:', message);
-    return res.status(200).json({
-      data: buildFallbackPosts(query),
-      meta: { fallback: true, message },
-    });
+  } else {
+    console.warn('[X proxy] No JINA_API_KEY, skipping JSearch');
   }
+
+  // === 2. RSS BACKUP (FREE, STABLE) ===
+  try {
+    const rssUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(
+      `https://rsshub.app/twitter/search?q=${encodeURIComponent(query)}`
+    )}`;
+    const rssRes = await fetch(rssUrl);
+    if (rssRes.ok) {
+      const { contents } = await rssRes.json();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(contents, 'text/xml');
+      const items = doc.querySelectorAll('item');
+      const fallbackData = Array.from(items).map(item => {
+        const link = item.querySelector('link')?.textContent || '#';
+        const id = link.split('/').pop() || crypto.randomUUID();
+        return {
+          id,
+          text: (item.querySelector('title')?.textContent || item.querySelector('description')?.textContent || '').trim(),
+          user: {
+            name: item.querySelector('author')?.textContent || 'Unknown',
+            username: item.querySelector('dc\\:creator')?.textContent || 'unknown',
+          },
+          url: link,
+          created_at: item.querySelector('pubDate')?.textContent || new Date().toISOString(),
+          likes: 0,
+          replies: 0,
+        };
+      }).slice(0, 10);
+
+      if (fallbackData.length > 0) {
+        return res.status(200).json({ data: fallbackData });
+      }
+    }
+  } catch (rssError) {
+    console.error('[X proxy] RSS backup failed:', rssError);
+  }
+
+  // === 3. FINAL FALLBACK (WARMING UP) ===
+  return res.status(200).json({
+    data: buildFallbackPosts(query),
+    meta: { fallback: true, message: 'All sources failed' },
+  });
 }
 
 function buildFallbackPosts(query) {
