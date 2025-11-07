@@ -32,11 +32,21 @@ export default async function handler(req, res) {
   const query = req.query.q || req.query.query;
   if (!query) return res.status(400).json({ error: 'Missing ?q=...' });
 
+  const apiKey = process.env.JINA_API_KEY;
+  if (!apiKey) {
+    console.error('[X proxy] Missing JINA_API_KEY');
+    return res.status(200).json({
+      data: buildFallbackPosts(query),
+      meta: { fallback: true, message: 'Missing JINA_API_KEY' },
+    });
+  }
+
   try {
     const response = await fetch('https://jsearch.jina.ai/v1/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
         'User-Agent': 'echothread-proxy/1.0',
       },
       body: JSON.stringify({
