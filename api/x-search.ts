@@ -1,11 +1,23 @@
-// api/x-search.js
+// api/x-search.ts
 
 
 export const config = {
-  runtime: "nodejs18.x",
+  runtime: "nodejs20.x",
 }
 
-export default async function handler(req, res) {
+type VercelRequest = {
+  method?: string
+  query: Record<string, string | string[] | undefined>
+}
+
+type VercelResponse = {
+  setHeader(name: string, value: string | readonly string[]): void
+  status(code: number): VercelResponse
+  json(payload: any): VercelResponse
+  end(): void
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
