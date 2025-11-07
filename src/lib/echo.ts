@@ -10,6 +10,7 @@ type GoogleOrganicResult = {
   snippet?: string
   link?: string
   source?: string
+  date?: string
 }
 type GoogleResponse = { organic?: GoogleOrganicResult[] }
 type RedditPost = {
@@ -255,6 +256,7 @@ export type EchoInsight = {
     snippet: string
     link: string
     source: string
+    publishedAt: string
   }>
   timestamp: string
 }
@@ -302,6 +304,7 @@ export async function buildEchoInsight(
       snippet: (item?.snippet || "No snippet available").trim(),
       link: item?.link || "#",
       source: item?.source?.trim() || "Unknown source",
+      publishedAt: item?.date?.trim() || "",
     }))
 
   const redditItems = tweets.map((post, index) => {
