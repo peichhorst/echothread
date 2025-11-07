@@ -3,25 +3,25 @@ export const config = {
   runtime: "nodejs",
 };
 
-/**
- * @typedef {Object} VercelRequest
- * @property {string} [method]
- * @property {Record<string, string | string[] | undefined>} query
- */
-/**
- * @typedef {Object} VercelResponse
- * @property {(name: string, value: string | readonly string[]) => void} setHeader
- * @property {(code: number) => VercelResponse} status
- * @property {(payload: any) => VercelResponse} json
- * @property {() => void} end
- */
+function buildFallbackPosts(query) {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: `fallback-${Date.now()}`,
+      text: `Live X feed is warming up. Keeping an eye on "${query}" while we reconnect.`,
+      user: {
+        name: "Signal Relay",
+        username: "echo-thread",
+      },
+      url: "#",
+      created_at: now,
+      likes: 0,
+      replies: 0,
+    },
+  ];
+}
 
-/**
- * @param {VercelRequest} req
- * @param {VercelResponse} res
- */
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.JINA_API_KEY;
 
-  // === 1. TRY JSEARCH (PRIMARY) ===
+  // === 1. TRY JSEARCH (OPTIONAL, IF KEY EXISTS) ===
   if (apiKey) {
     try {
       const response = await fetch('https://jsearch.jina.ai/v1/search', {
@@ -61,16 +61,16 @@ export default async function handler(req, res) {
           throw new Error('Invalid JSON from JSearch');
         }
         const data = Array.isArray(payload?.data) ? payload.data : [];
-        return res.status(200).json({ data });
+        if (data.length > 0) {
+          return res.status(200).json({ data });
+        }
       }
     } catch (error) {
-      console.warn('[X proxy] JSearch failed, trying RSS backup:', error.message);
+      console.warn('[X proxy] JSearch failed, using RSS backup:', error.message);
     }
-  } else {
-    console.warn('[X proxy] No JINA_API_KEY, skipping JSearch');
   }
 
-  // === 2. RSS BACKUP (FREE, STABLE) ===
+  // === 2. RSS BACKUP (PRIMARY, ALWAYS WORKS) ===
   try {
     const rssUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(
       `https://rsshub.app/twitter/search?q=${encodeURIComponent(query)}`
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(contents, 'text/xml');
       const items = doc.querySelectorAll('item');
-      const fallbackData = Array.from(items).map(item => {
+      const rssData = Array.from(items).map(item => {
         const link = item.querySelector('link')?.textContent || '#';
         const id = link.split('/').pop() || crypto.randomUUID();
         return {
@@ -98,35 +98,17 @@ export default async function handler(req, res) {
         };
       }).slice(0, 10);
 
-      if (fallbackData.length > 0) {
-        return res.status(200).json({ data: fallbackData });
+      if (rssData.length > 0) {
+        return res.status(200).json({ data: rssData });
       }
     }
   } catch (rssError) {
     console.error('[X proxy] RSS backup failed:', rssError);
   }
 
-  // === 3. FINAL FALLBACK (WARMING UP) ===
+  // === 3. FINAL FALLBACK ===
   return res.status(200).json({
     data: buildFallbackPosts(query),
     meta: { fallback: true, message: 'All sources failed' },
   });
-}
-
-function buildFallbackPosts(query) {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: `fallback-${Date.now()}`,
-      text: `Live X feed is warming up. Keeping an eye on "${query}" while we reconnect.`,
-      user: {
-        name: "Signal Relay",
-        username: "echo-thread",
-      },
-      url: "#",
-      created_at: now,
-      likes: 0,
-      replies: 0,
-    },
-  ];
 }
