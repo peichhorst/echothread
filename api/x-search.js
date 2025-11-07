@@ -1,4 +1,8 @@
-// api/x-search.js — call Grok's X tool
+// api/x-search.js
+export const config = {
+  runtime: "nodejs",
+};
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -10,22 +14,37 @@ export default async function handler(req, res) {
   const query = req.query.q || req.query.query;
   if (!query) return res.status(400).json({ error: 'Missing ?q=...' });
 
+  const apiKey = process.env.XAI_API_KEY;  // ← FROM VERCEL ENV
+
+  if (!apiKey) {
+    console.error('[X proxy] Missing XAI_API_KEY');
+    return res.status(200).json({
+      data: buildFallbackPosts(query),
+      meta: { fallback: true, message: 'Missing XAI_API_KEY' },
+    });
+  }
+
   try {
-    // Call Grok's X search (via xAI endpoint — replace with actual)
-    const grokRes = await fetch('https://api.x.ai/v1/x-search', {
+    const response = await fetch('https://api.x.ai/v1/x-search', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer your_xai_key', 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,  // ← CORRECT: FROM ENV
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         query,
         limit: 10,
-        mode: 'Latest'
-      })
+        mode: 'Latest',
+      }),
     });
 
-    if (!grokRes.ok) throw new Error(`Grok X search failed: ${grokRes.status}`);
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`xAI failed: ${response.status} - ${err}`);
+    }
 
-    const grokData = await grokRes.json();
-    const data = grokData.posts || [];
+    const result = await response.json();
+    const data = Array.isArray(result.posts) ? result.posts : [];
 
     return res.status(200).json({ data });
   } catch (error) {
@@ -33,7 +52,22 @@ export default async function handler(req, res) {
     console.error('[X proxy] ERROR:', message);
     return res.status(200).json({
       data: buildFallbackPosts(query),
-      meta: { fallback: true, message }
+      meta: { fallback: true, message },
     });
   }
+}
+
+function buildFallbackPosts(query) {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: `fallback-${Date.now()}`,
+      text: `Live X feed is warming up. Keeping an eye on "${query}" while we reconnect.`,
+      user: { name: "Signal Relay", username: "echo-thread" },
+      url: "#",
+      created_at: now,
+      likes: 0,
+      replies: 0,
+    },
+  ];
 }
