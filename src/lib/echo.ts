@@ -52,6 +52,9 @@ const formatMillions = (value: number) =>
     compactDisplay: "short",
   }).format(value * 1_000_000)
 
+const stripLinks = (value: string) =>
+  value.replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim()
+
 export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   const cleanQuery = query.trim()
   if (!cleanQuery) return null
@@ -301,21 +304,23 @@ export async function buildEchoInsight(
     .map((item, index) => ({
       id: item?.link || `${selection}-news-${index}`,
       title: item?.title?.trim() || item?.snippet?.slice(0, 120) || "Untitled headline",
-      snippet: (item?.snippet || "No snippet available").trim(),
+      snippet: stripLinks(item?.snippet || "No snippet available"),
       link: item?.link || "#",
       source: item?.source?.trim() || "Unknown source",
       publishedAt: item?.date?.trim() || "",
     }))
 
-  const redditItems = tweets.map((post, index) => {
-    const permalink = post.permalink || ""
-    const externalUrl = post.url?.trim()
-    const safeExternalUrl =
-      externalUrl && !isImageUrl(externalUrl) ? externalUrl : ""
-    const rawSelftext = post.selftext?.trim() || ""
+  const redditItems = tweets
+    .filter((post) => !((post.selftext || "").toLowerCase().includes("https://preview.redd.it")))
+    .map((post, index) => {
+      const permalink = post.permalink || ""
+      const externalUrl = post.url?.trim()
+      const safeExternalUrl =
+        externalUrl && !isImageUrl(externalUrl) ? externalUrl : ""
+      const rawSelftext = stripLinks(post.selftext?.trim() || "")
 
-    return {
-      id: post.id || `${selection}-reddit-${index}`,
+      return {
+        id: post.id || `${selection}-reddit-${index}`,
       title: post.title?.trim() || "Untitled post",
       author: post.author || "unknown",
       subreddit: post.subreddit || "",
@@ -326,7 +331,7 @@ export async function buildEchoInsight(
       commentCount: post.num_comments ?? 0,
       selftext: isImageUrl(rawSelftext) ? "" : rawSelftext,
     }
-  })
+    })
 
   const jobItems = jobs.map((job, index) => ({
     id: job.job_id || job.job_apply_link || `${selection}-job-${index}`,
@@ -334,7 +339,7 @@ export async function buildEchoInsight(
     employer: job.employer_name || "Unknown employer",
     location: [job.job_city, job.job_country].filter(Boolean).join(", "),
     postedAt: job.job_posted_at_datetime_utc || "",
-    description: (job.job_description || "No description available.").trim(),
+    description: stripLinks(job.job_description || "No description available."),
     applyLink: job.job_apply_link || "#",
     employmentType: job.job_employment_type || "",
   }))
