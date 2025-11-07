@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/*.js": {
+      "runtime": "nodejs"
+    },
+    "api/*.ts": {
+      "runtime": "nodejs"
+    }
+  }
+}
