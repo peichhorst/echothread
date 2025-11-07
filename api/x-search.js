@@ -1,6 +1,18 @@
 // api/x-search.js
-export const config = {
-  runtime: "nodejs",
+import { XMLParser } from 'fast-xml-parser';
+import { randomUUID } from 'node:crypto';
+
+export const config = { runtime: 'nodejs' };
+
+// --- tiny helpers ---
+const withTimeout = async (url, opts = {}, ms = 8000) => {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(id);
+  }
 };
 
 function buildFallbackPosts(query) {
@@ -9,8 +21,8 @@ function buildFallbackPosts(query) {
     {
       id: `fallback-${Date.now()}`,
       text: `Live X feed is warming up. Keeping an eye on "${query}" while we reconnect.`,
-      user: { name: "Signal Relay", username: "echo-thread" },
-      url: "#",
+      user: { name: 'Signal Relay', username: 'echo-thread' },
+      url: '#',
       created_at: now,
       likes: 0,
       replies: 0,
@@ -18,11 +30,21 @@ function buildFallbackPosts(query) {
   ];
 }
 
+function safeTweetIdFromLink(link) {
+  try {
+    const u = new URL(link);
+    const last = u.pathname.split('/').filter(Boolean).pop();
+    return last || randomUUID();
+  } catch {
+    return randomUUID();
+  }
+}
+
 export default async function handler(req, res) {
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
@@ -31,79 +53,103 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.JINA_API_KEY;
 
-  // === 1. RSS PRIMARY (ALWAYS WORKS) ===
+  // Helpful caching (tune to taste)
+  res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+
+  // === 1) RSS PRIMARY (no key required) ===
   try {
-    const rssUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(
-      `https://rsshub.app/twitter/search?q=${encodeURIComponent(query)}`
-    )}`;
-    const rssRes = await fetch(rssUrl);
+    // NOTE: RSSHub has moved many paths from /twitter/* to /x/*; this search feed works on public mirrors.
+    const rssHubUrl = `https://rsshub.app/x/search/${encodeURIComponent(query)}`;
+    const wrapped = `https://api.allorigins.win/get?url=${encodeURIComponent(rssHubUrl)}`;
+
+    const rssRes = await withTimeout(wrapped, { headers: { 'User-Agent': 'echothread-proxy/1.0' } }, 8000);
     if (rssRes.ok) {
       const { contents } = await rssRes.json();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(contents, 'text/xml');
-      const items = doc.querySelectorAll('item');
-      const rssData = Array.from(items).map(item => {
-        const link = item.querySelector('link')?.textContent || '#';
-        const id = link.split('/').pop() || crypto.randomUUID();
-        return {
-          id,
-          text: (item.querySelector('title')?.textContent || item.querySelector('description')?.textContent || '').trim(),
-          user: {
-            name: item.querySelector('author')?.textContent || 'Unknown',
-            username: item.querySelector('dc\\:creator')?.textContent || 'unknown',
-          },
-          url: link,
-          created_at: item.querySelector('pubDate')?.textContent || new Date().toISOString(),
-          likes: 0,
-          replies: 0,
-        };
-      }).slice(0, 10);
+      const parser = new XMLParser({
+        ignoreAttributes: false,
+        attributeNamePrefix: '',
+        textNodeName: 'text',
+        trimValues: true,
+        cdataPropName: 'cdata', // keep CDATA if present
+      });
+
+      const doc = parser.parse(contents);
+      const items = doc?.rss?.channel?.item || [];
+
+      const rssData = (Array.isArray(items) ? items : [items])
+        .slice(0, 10)
+        .map((item) => {
+          const link = item.link || '#';
+          const title = item.title || '';
+          const description = item.description || '';
+          const created = item.pubDate || new Date().toISOString();
+          const author =
+            item.author ||
+            (item['dc:creator'] ?? 'Unknown');
+
+          return {
+            id: safeTweetIdFromLink(link),
+            text: (title || description || '').toString().trim(),
+            user: {
+              name: author || 'Unknown',
+              username: (author || 'unknown').toString().replace(/^@/, ''),
+            },
+            url: link,
+            created_at: created,
+            likes: 0,
+            replies: 0,
+          };
+        });
 
       if (rssData.length > 0) {
         return res.status(200).json({ data: rssData });
       }
     }
-  } catch (rssError) {
-    console.error('[X proxy] RSS backup failed:', rssError);
+  } catch (err) {
+    console.error('[X proxy] RSS step failed:', err);
   }
 
-  // === 2. JINA SECONDARY (IF KEY) ===
+  // === 2) JINA SECONDARY (if key present) ===
   if (apiKey) {
     try {
-      const response = await fetch('https://jsearch.jina.ai/v1/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,  // ← CORRECT HEADER (not Bearer)
-          'User-Agent': 'echothread-proxy/1.0',
+      const jinaRes = await withTimeout(
+        'https://jsearch.jina.ai/v1/search',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey, // correct header
+            'User-Agent': 'echothread-proxy/1.0',
+          },
+          body: JSON.stringify({
+            query,
+            source: 'x',      // Jina supports 'x'
+            limit: 10,
+            reasoning: false,
+          }),
         },
-        body: JSON.stringify({
-          query,
-          source: 'x',
-          limit: 10,
-          reasoning: false,
-        }),
-      });
+        8000
+      );
 
-      const text = await response.text();
-      if (response.ok) {
-        let payload;
-        try {
-          payload = JSON.parse(text);
-        } catch {
-          throw new Error('Invalid JSON from JSearch');
-        }
-        const data = Array.isArray(payload?.data) ? payload.data : [];
-        if (data.length > 0) {
-          return res.status(200).json({ data });
-        }
+      const raw = await jinaRes.text();
+      if (!jinaRes.ok) throw new Error(`Jina HTTP ${jinaRes.status}: ${raw?.slice(0, 160)}`);
+
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        throw new Error('Invalid JSON from Jina');
       }
-    } catch (error) {
-      console.warn('[X proxy] JSearch failed:', error.message);
+      const data = Array.isArray(payload?.data) ? payload.data : [];
+      if (data.length > 0) {
+        return res.status(200).json({ data });
+      }
+    } catch (err) {
+      console.warn('[X proxy] Jina step failed:', err.message);
     }
   }
 
-  // === 3. FINAL FALLBACK ===
+  // === 3) FINAL FALLBACK ===
   return res.status(200).json({
     data: buildFallbackPosts(query),
     meta: { fallback: true, message: 'All sources failed' },
