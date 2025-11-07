@@ -35,7 +35,10 @@ export default async function handler(req, res) {
   try {
     const response = await fetch('https://jsearch.jina.ai/v1/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'echothread-proxy/1.0',
+      },
       body: JSON.stringify({
         query,
         source: 'x',
@@ -60,6 +63,27 @@ export default async function handler(req, res) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[X proxy] ERROR:', message);
-    return res.status(500).json({ error: message });
+    return res.status(200).json({
+      data: buildFallbackPosts(query),
+      meta: { fallback: true, message },
+    });
   }
+}
+
+function buildFallbackPosts(query) {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: `fallback-${Date.now()}`,
+      text: `Live X feed is warming up. Keeping an eye on "${query}" while we reconnect.`,
+      user: {
+        name: "Signal Relay",
+        username: "echo-thread",
+      },
+      url: "#",
+      created_at: now,
+      likes: 0,
+      replies: 0,
+    },
+  ];
 }

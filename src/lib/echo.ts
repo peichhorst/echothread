@@ -199,6 +199,9 @@ const fetchX = async (): Promise<XPost[]> => {
       }
 
       const posts = Array.isArray(payload?.data) ? payload.data : []
+      if (payload?.meta?.fallback) {
+        console.warn("[X proxy] Using fallback data:", payload.meta.message)
+      }
 
       return posts.map((post: any, index: number) => ({
         id:
