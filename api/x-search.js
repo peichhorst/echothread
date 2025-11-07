@@ -1,13 +1,13 @@
+// api/x-search.js
 export const config = {
   runtime: "nodejs",
-}
+};
 
 /**
  * @typedef {Object} VercelRequest
  * @property {string} [method]
  * @property {Record<string, string | string[] | undefined>} query
  */
-
 /**
  * @typedef {Object} VercelResponse
  * @property {(name: string, value: string | readonly string[]) => void} setHeader
