@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/x-search.ts": {
-      "runtime": "nodejs20.x"
-    }
-  }
-}
