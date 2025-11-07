@@ -174,7 +174,10 @@ const fetchX = async (): Promise<XPost[]> => {
 
       const raw = await response.text()
       if (!response.ok) {
-        throw new Error(`X proxy request failed (${response.status}): ${raw}`)
+        console.warn(
+          `[X proxy] HTTP ${response.status}: ${raw.slice(0, 120)}`
+        )
+        return null
       }
 
       const trimmed = raw.trim()
