@@ -1,6 +1,11 @@
 const SERPER_API = "https://google.serper.dev/search"
 const REDDIT_PROXY_URL =
   import.meta.env.VITE_REDDIT_PROXY_URL ?? "/api/reddit-search"
+const LOCAL_X_PROXY = "/api/x-search"
+const REMOTE_X_PROXY = "https://echothread-eta.vercel.app/api/x-search"
+const X_PROXY_URL =
+  import.meta.env.VITE_X_PROXY_URL?.trim() ||
+  (import.meta.env.DEV ? REMOTE_X_PROXY : LOCAL_X_PROXY)
 const JSEARCH_API_HOST =
   import.meta.env.VITE_RAPIDAPI_HOST?.trim() || "jsearch.p.rapidapi.com"
 const JSEARCH_API = `https://${JSEARCH_API_HOST}/search`
@@ -25,6 +30,18 @@ type RedditPost = {
   score?: number
   subreddit?: string
 }
+type XPost = {
+  id?: string
+  text?: string
+  user?: {
+    name?: string
+    username?: string
+  }
+  url?: string
+  created_at?: string
+  likes?: number
+  replies?: number
+}
 type JobResult = {
   job_id?: string
   job_title?: string
@@ -39,7 +56,8 @@ type JobResult = {
 
 export type EchoPayload = {
   google: GoogleResponse | null
-  x: RedditPost[]
+  reddit: RedditPost[]
+  xPosts: XPost[]
   jobs: JobResult[]
 }
 
@@ -69,6 +87,8 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return null
   }
 
+
+  
   const fetchGoogle = async (): Promise<GoogleResponse | null> => {
     if (!serperKey) return null
     const response = await fetch(SERPER_API, {
@@ -88,7 +108,7 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return (await response.json()) as GoogleResponse
   }
 
-  const fetchX = async (): Promise<RedditPost[] | null> => {
+  const fetchReddit = async (): Promise<RedditPost[] | null> => {
     const params = new URLSearchParams({
       q: cleanQuery,
     })
@@ -142,6 +162,69 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
       })
   }
 
+const fetchX = async (): Promise<XPost[]> => {
+  if (!cleanQuery) return []
+
+  const fetchFrom = async (baseUrl: string): Promise<XPost[] | null> => {
+    try {
+      const params = new URLSearchParams({ q: cleanQuery })
+      const response = await fetch(`${baseUrl}?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+      })
+
+      const raw = await response.text()
+      if (!response.ok) {
+        throw new Error(`X proxy request failed (${response.status}): ${raw}`)
+      }
+
+      const trimmed = raw.trim()
+      if (
+        trimmed.startsWith("function ") ||
+        trimmed.startsWith("export default") ||
+        trimmed.startsWith("<!DOCTYPE")
+      ) {
+        console.warn("[X proxy] Received source instead of JSON; falling back.")
+        return null
+      }
+
+      let payload: any
+      try {
+        payload = JSON.parse(raw)
+      } catch {
+        console.warn("[X proxy] Non-JSON payload:", raw.slice(0, 200))
+        return null
+      }
+
+      const posts = Array.isArray(payload?.data) ? payload.data : []
+
+      return posts.map((post: any, index: number) => ({
+        id:
+          post?.id ||
+          globalThis.crypto?.randomUUID?.() ||
+          `x-post-${Date.now()}-${index}`,
+        text: stripLinks(post?.text || post?.content || "No text"),
+        user: {
+          name: post?.user?.name || post?.author?.name || post?.author || "Unknown",
+          username: post?.user?.username || post?.username || "unknown",
+        },
+        url: post?.url || (post?.id ? `https://x.com/i/status/${post.id}` : "#"),
+        created_at: post?.created_at || post?.timestamp || new Date().toISOString(),
+        likes: post?.likes ?? post?.like_count ?? 0,
+        replies: post?.replies ?? post?.reply_count ?? 0,
+      }))
+    } catch (error) {
+      console.warn("X feed fetch failed", error)
+      return null
+    }
+  }
+
+  let posts = await fetchFrom(X_PROXY_URL)
+  if (!posts && X_PROXY_URL === LOCAL_X_PROXY) {
+    posts = await fetchFrom(REMOTE_X_PROXY)
+  }
+  return posts ?? []
+}
+
   const fetchJobs = async (): Promise<JobResult[]> => {
     if (!rapidKey) return []
     const response = await fetch(
@@ -165,8 +248,9 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return Array.isArray(payload.data) ? payload.data : []
   }
 
-  const [googleResult, xResult, jobResult] = await Promise.allSettled([
+  const [googleResult, redditResult, xResult, jobResult] = await Promise.allSettled([
     fetchGoogle(),
+    fetchReddit(),
     fetchX(),
     fetchJobs(),
   ])
@@ -174,28 +258,34 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   if (googleResult.status === "rejected") {
     console.warn("Google echo fetch failed", googleResult.reason)
   }
+  if (redditResult.status === "rejected") {
+    console.warn("Reddit echo fetch failed", redditResult.reason)
+  }
   if (xResult.status === "rejected") {
-    console.warn("Reddit echo fetch failed", xResult.reason)
+    console.warn("X feed fetch failed", xResult.reason)
   }
   if (jobResult.status === "rejected") {
     console.warn("JSearch echo fetch failed", jobResult.reason)
   }
 
   const google = googleResult.status === "fulfilled" ? googleResult.value : null
-  const x = xResult.status === "fulfilled" ? xResult.value ?? [] : []
+  const reddit = redditResult.status === "fulfilled" ? redditResult.value ?? [] : []
+  const xPosts = xResult.status === "fulfilled" ? xResult.value ?? [] : []
   const jobs = jobResult.status === "fulfilled" ? jobResult.value : []
 
   const hasNews = google && (google.organic?.length ?? 0) > 0
-  const hasX = x.length > 0
+  const hasReddit = reddit.length > 0
+  const hasX = xPosts.length > 0
   const hasJobs = jobs.length > 0
 
-  if (!hasNews && !hasX && !hasJobs) {
+  if (!hasNews && !hasReddit && !hasX && !hasJobs) {
     return null
   }
 
   return {
     google,
-    x,
+    reddit,
+    xPosts,
     jobs,
   }
 }
@@ -227,7 +317,7 @@ const isImageUrl = (value?: string | null) => {
 export type EchoInsight = {
   id: string
   selection: string
-  tweetSummary: string
+  redditSummary: string
   redditItems: Array<{
     id: string
     title: string
@@ -239,6 +329,17 @@ export type EchoInsight = {
     score: number
     commentCount: number
     selftext: string
+  }>
+  xSummary: string
+  xItems: Array<{
+    id: string
+    text: string
+    author: string
+    username: string
+    url: string
+    publishedAt: string
+    likes: number
+    replies: number
   }>
   newsSummary: string
   marketSummary: string
@@ -274,15 +375,21 @@ export async function buildEchoInsight(
   const payload = await fetcher(cleanSelection)
   if (!payload) return null
 
-  const tweets = payload.x ?? []
+  const redditPosts = payload.reddit ?? []
+  const xPosts = payload.xPosts ?? []
   const news = payload.google?.organic ?? []
   const jobs = payload.jobs ?? []
 
-  const tweetSummary = fallbackLine(
+  const redditSummary = fallbackLine(
     "Reddit",
-    tweets.length
-      ? `${tweets.length} new Reddit posts streaming in.`
+    redditPosts.length
+      ? `${redditPosts.length} new Reddit posts streaming in.`
       : ""
+  )
+
+  const xSummary = fallbackLine(
+    "X",
+    xPosts.length ? `${xPosts.length} live conversations captured.` : ""
   )
 
   const newsSummary = fallbackLine(
@@ -310,7 +417,7 @@ export async function buildEchoInsight(
       publishedAt: item?.date?.trim() || "",
     }))
 
-  const redditItems = tweets
+  const redditItems = redditPosts
     .filter((post) => !((post.selftext || "").toLowerCase().includes("https://preview.redd.it")))
     .map((post, index) => {
       const permalink = post.permalink || ""
@@ -333,6 +440,31 @@ export async function buildEchoInsight(
     }
     })
 
+   
+  const xItems = xPosts.map((post, index) => ({
+    id: post.id || `${selection}-x-${index}`,
+    text: stripLinks(post.text || "No post text provided."),
+    author: post.user?.name || post.user?.username || "Unknown",
+    username: post.user?.username || "unknown",
+    url: post.url || (post.id ? `https://x.com/i/status/${post.id}` : "#"),
+    publishedAt: post.created_at || "",
+    likes: post.likes ?? 0,
+    replies: post.replies ?? 0,
+  }))
+   
+ /*
+  const xItems = xPosts.map((post, index) => ({
+  id: post.id || `${selection}-x-${index}`,
+  text: stripLinks(post.text || "No post text provided."),
+  author: post.user?.name || post.user?.username || "Unknown",
+  username: post.user?.username || "unknown",
+  url: post.url || `https://x.com/i/status/${post.id}`,
+  publishedAt: post.created_at || "",
+  likes: post.likes || 0,
+  replies: post.replies || 0
+}))
+ */
+
   const jobItems = jobs.map((job, index) => ({
     id: job.job_id || job.job_apply_link || `${selection}-job-${index}`,
     title: job.job_title || "Untitled role",
@@ -347,13 +479,16 @@ export async function buildEchoInsight(
   return {
     id: `echo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     selection: cleanSelection,
-    tweetSummary,
+    redditSummary,
     redditItems,
+    xSummary,
+    xItems,
     newsSummary,
     marketSummary,
     jobSummary,
     jobItems,
     newsItems,
     timestamp: new Date().toISOString(),
+
   }
 }

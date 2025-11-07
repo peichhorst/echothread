@@ -11,9 +11,10 @@ import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
 const INITIAL_BATCH = 5
 const SNIPPET_LIMIT = 500
 
-type SectionKey = "reddit" | "news" | "jobs" | "market"
+type SectionKey = "reddit" | "x" | "news" | "jobs" | "market"
 const SECTION_LABELS: Record<SectionKey, string> = {
   reddit: "Reddit",
+  x: "X",
   news: "News",
   jobs: "Jobs",
   market: "Market pulse",
@@ -57,12 +58,13 @@ export default function App() {
   const [isFetching, setIsFetching] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [customQuery, setCustomQuery] = useState("")
-  const [lastQuery, setLastQuery] = useState<string | null>(null)
   const [visibleRedditCounts, setVisibleRedditCounts] = useState<Record<string, number>>({})
+  const [visibleXCounts, setVisibleXCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
   const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>({
     reddit: true,
+    x: true,
     news: true,
     jobs: true,
     market: true,
@@ -80,12 +82,34 @@ export default function App() {
     editorProps: {
       attributes: {
         class:
-          "prose prose-invert max-w-none focus:outline-none min-h-[200px] max-h-[260px] overflow-auto text-base lg:text-lg",
+          "prose prose-invert max-w-none focus:outline-none min-h-[140px] max-h-[220px] overflow-auto text-base lg:text-lg",
       },
     },
   })
 
   useEffect(() => {
+    setVisibleXCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+    if (!editor) return
+    const timeout = setTimeout(() => {
+      editor.commands.focus("end")
+    }, 50)
+    return () => clearTimeout(timeout)
+  }, [editor])
+
+  useEffect(() => {
+    setVisibleXCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
     setVisibleRedditCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
@@ -142,7 +166,6 @@ export default function App() {
 
       setEchoes((prev) => [insight, ...prev])
       setEchoCount((count) => count + 1)
-      setLastQuery(trimmed)
       return true
     } catch (error) {
       const message =
@@ -179,6 +202,12 @@ export default function App() {
       [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
     }))
 
+  const loadMoreX = (id: string) =>
+    setVisibleXCounts((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+    }))
+
   const loadMoreNews = (id: string) =>
     setVisibleNewsCounts((prev) => ({
       ...prev,
@@ -198,43 +227,40 @@ export default function App() {
     }))
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950 text-white overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950 text-white overflow-x-hidden flex flex-col">
       <header className="sticky top-0 z-50 bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950/95 border-b border-white/10 shadow-2xl">
-        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-6 grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_auto] items-start">
-          <div className="space-y-3">
-            <div className="flex items-center gap-5">
-              <Sparkles className="w-16 h-16 text-yellow-400 animate-pulse" />
-              <h1 className="text-5xl sm:text-6xl font-black tracking-tight">Echo<br />Thread</h1>
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center gap-5">
+                <Sparkles className="w-16 h-16 text-yellow-400 animate-pulse" />
+                <h1 className="text-5xl sm:text-6xl font-black tracking-tight">EchoThread</h1>
+              </div>
+            </div>
+            <div className="w-full lg:w-auto">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Input
+                  value={customQuery}
+                  onChange={(event) => setCustomQuery(event.target.value)}
+                  placeholder="Global echo... type anything"
+                  disabled={isFetching}
+                  className="bg-transparent border-white/20 flex-1"
+                />
+                <Button
+                  type="button"
+                  onClick={handleCustomEcho}
+                  disabled={isFetching}
+                  className="bg-purple-600 hover:bg-purple-500 text-white font-semibold w-full sm:w-auto"
+                >
+                  Echo
+                </Button>
+              </div>
             </div>
           </div>
-          <motion.div
-            initial={{ scale: 0, rotate: -360 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", stiffness: 260, damping: 20 }}
-            className="flex justify-center lg:justify-end"
-          >
-            <Button
-              onClick={handleEcho}
-              disabled={isFetching}
-              className="rounded-full w-24 h-24 lg:w-28 lg:h-28 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-4xl font-black flex items-center justify-center disabled:opacity-70"
-              aria-label="Trigger echo"
-            >
-              {isFetching ? (
-                <Loader2 className="w-10 h-10 lg:w-12 lg:h-12 animate-spin" />
-              ) : (
-                <div className="flex flex-col items-center gap-2 leading-tight text-center">
-                  <span className="text-xs lg:text-sm font-semibold tracking-wide text-white/80">
-                    {echoCount}
-                  </span>
-                  <Waves className="w-14 h-14 lg:w-20 lg:h-20" />
-                </div>
-              )}
-            </Button>
-          </motion.div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 lg:px-10 pt-10 pb-32">
+      <main className="flex-1 max-w-6xl mx-auto px-6 lg:px-10 pt-8 pb-6 flex flex-col">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] items-stretch">
           <aside className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl h-full flex flex-col">
 
@@ -249,7 +275,7 @@ export default function App() {
           </div>
           <div className="p-6 sm:p-8 space-y-6 flex-1 flex flex-col">
             <div className="grid gap-4">
-              {(["reddit", "news", "jobs", "market"] as SectionKey[]).map((section) => (
+              {(["reddit", "x", "news", "jobs", "market"] as SectionKey[]).map((section) => (
                 <label
                   key={section}
                   className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80"
@@ -265,37 +291,6 @@ export default function App() {
               ))}
             </div>
 
-            <details className="rounded-2xl border border-white/10 bg-white/5 text-white/80">
-              <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                Custom echo controls
-              </summary>
-              <div className="px-4 sm:px-6 py-4 space-y-4">
-                <p className="text-xs text-white/60">
-                  Prefer to query something other than the highlighted text? Drop it here or re-run your last echo instantly.
-                </p>
-                <div className="flex flex-col gap-3">
-                  <Input
-                    value={customQuery}
-                    onChange={(event) => setCustomQuery(event.target.value)}
-                    placeholder="Type a keyword, ticker, or phrase..."
-                    disabled={isFetching}
-                  />
-                  <div className="flex flex-col gap-1">
-                    <Button
-                      type="button"
-                      onClick={handleCustomEcho}
-                      disabled={isFetching}
-                      className="rounded-2xl border border-white/20 bg-purple-600/90 text-white font-semibold shadow-lg transition hover:bg-purple-500/90 disabled:opacity-60"
-                    >
-                      Echo
-                    </Button>
-                    {lastQuery && (
-                      <p className="text-xs text-white/50">Last echo: "{lastQuery}"</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </details>
           </div>
         </aside>
 
@@ -308,13 +303,39 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div className="p-6 sm:p-8 space-y-5 max-h-[460px] overflow-y-auto flex-1">
-            <EditorContent editor={editor} />
+          <div className="p-6 sm:p-8 flex-1 flex flex-col gap-5">
+            <div className="flex-1 overflow-y-auto max-h-[460px]">
+              <EditorContent editor={editor} />
+            </div>
+            <motion.div
+              initial={{ scale: 0, rotate: -360 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20 }}
+              className="flex justify-end"
+            >
+              <Button
+                onClick={handleEcho}
+                disabled={isFetching}
+                className="rounded-full w-24 h-24 lg:w-28 lg:h-28 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-4xl font-black flex items-center justify-center disabled:opacity-70"
+                aria-label="Trigger echo"
+              >
+                {isFetching ? (
+                  <Loader2 className="w-10 h-10 lg:w-12 lg:h-12 animate-spin" />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 leading-tight text-center">
+                    <span className="text-xs lg:text-sm font-semibold tracking-wide text-white/80">
+                      {echoCount}
+                    </span>
+                    <Waves className="w-14 h-14 lg:w-20 lg:h-20" />
+                  </div>
+                )}
+              </Button>
+            </motion.div>
           </div>
         </div>
       </div>
 
-      <section className="mt-10 space-y-8">
+      <section className="mt-auto flex flex-col gap-6 w-full">
         {feedback && (
           <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/15 text-yellow-100 px-4 py-3 text-sm">
             {feedback}
@@ -322,8 +343,10 @@ export default function App() {
         )}
 
         {echoes.length === 0 ? (
-          <div className="rounded-3xl border border-white/10 bg-white/5 text-white/80 p-8 leading-relaxed shadow-2xl">
-            &copy; Peter Eichhorst
+          <div className="flex items-end">
+            <div className="rounded-3xl border border-white/10 bg-white/5 text-white/80 p-8 leading-relaxed shadow-2xl w-full">
+              &copy; Peter Eichhorst
+            </div>
           </div>
         ) : (
           <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
@@ -354,17 +377,17 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-4 text-purple-50/90 text-sm leading-relaxed">
-                  {sectionVisibility.reddit && (
-                    <section className="space-y-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
-                        Reddit
-                      </h4>
-                      <p>{echo.tweetSummary}</p>
-                      {echo.redditItems.length > 0 && (
-                        <div className="space-y-2">
-                          {echo.redditItems
-                            .slice(0, visibleRedditCounts[echo.id] ?? INITIAL_BATCH)
-                            .map((item) => {
+                    {sectionVisibility.reddit && (
+                      <section className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                          Reddit
+                        </h4>
+                        <p>{echo.redditSummary}</p>
+                        {echo.redditItems.length > 0 && (
+                          <div className="space-y-2">
+                            {echo.redditItems
+                              .slice(0, visibleRedditCounts[echo.id] ?? INITIAL_BATCH)
+                              .map((item) => {
                               const createdAtDisplay = formatDateTime(item.createdAt)
                               return (
                                 <article
@@ -412,9 +435,68 @@ export default function App() {
                             </Button>
                           )}
                         </div>
-                      )}
-                    </section>
-                  )}
+                        )}
+                      </section>
+                    )}
+
+                    {sectionVisibility.x && (
+                      <section className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                          X
+                        </h4>
+                        <p>{echo.xSummary}</p>
+                        {echo.xItems.length > 0 && (
+                          <div className="space-y-2">
+                            {echo.xItems
+                              .slice(0, visibleXCounts[echo.id] ?? INITIAL_BATCH)
+                              .map((item) => (
+                                <article
+                                  key={item.id}
+                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
+                                >
+                                  <p className="text-sm text-purple-50">
+                                    {truncate(item.text || "No content available.")}
+                                  </p>
+                                  <p className="text-[11px] uppercase tracking-wide text-purple-200/60 flex flex-wrap gap-1">
+                                    <span>{item.author || "Unknown"}</span>
+                                    {item.username && <span>• @{item.username}</span>}
+                                    {item.publishedAt && (
+                                      <span>
+                                        • {new Date(item.publishedAt).toLocaleString()}
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-[11px] text-purple-200/70">
+                                    ❤️ {item.likes ?? 0} • 💬 {item.replies ?? 0}
+                                  </p>
+                                  {item.url && (
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-purple-200 underline"
+                                    >
+                                      View thread
+                                    </a>
+                                  )}
+                                </article>
+                              ))}
+                            {echo.xItems.length >
+                              (visibleXCounts[echo.id] ?? INITIAL_BATCH) && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-purple-200"
+                                onClick={() => loadMoreX(echo.id)}
+                              >
+                                Read more X posts
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    )}
 
                   {sectionVisibility.news && (
                     <section className="space-y-2">
