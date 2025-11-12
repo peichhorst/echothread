@@ -1,15 +1,14 @@
+// src/lib/echo.ts
 const SERPER_API = "https://google.serper.dev/search"
 const REDDIT_PROXY_URL =
   import.meta.env.VITE_REDDIT_PROXY_URL ?? "/api/reddit-search"
-const LOCAL_X_PROXY = "/api/x-search"
-const REMOTE_X_PROXY = "https://echothread-eta.vercel.app/api/x-search"
-const X_PROXY_URL =
-  import.meta.env.VITE_X_PROXY_URL?.trim() ||
-  (import.meta.env.DEV ? REMOTE_X_PROXY : LOCAL_X_PROXY)
 const JSEARCH_API_HOST =
   import.meta.env.VITE_RAPIDAPI_HOST?.trim() || "jsearch.p.rapidapi.com"
 const JSEARCH_API = `https://${JSEARCH_API_HOST}/search`
 
+// -----------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------
 type GoogleOrganicResult = {
   title?: string
   snippet?: string
@@ -18,6 +17,7 @@ type GoogleOrganicResult = {
   date?: string
 }
 type GoogleResponse = { organic?: GoogleOrganicResult[] }
+
 type RedditPost = {
   id: string
   title: string
@@ -30,18 +30,23 @@ type RedditPost = {
   score?: number
   subreddit?: string
 }
+
 type XPost = {
   id?: string
   text?: string
-  user?: {
-    name?: string
-    username?: string
-  }
+  user?: { name?: string; username?: string }
   url?: string
   created_at?: string
   likes?: number
   replies?: number
 }
+
+type AIInsight = {
+  summary: string
+  takeaways: string[]
+  sentiment: "positive" | "negative" | "neutral"
+}
+
 type JobResult = {
   job_id?: string
   job_title?: string
@@ -59,267 +64,187 @@ export type EchoPayload = {
   reddit: RedditPost[]
   xPosts: XPost[]
   jobs: JobResult[]
+  ai?: AIInsight | null
 }
 
+// -----------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------
 const fallbackLine = (label: string, content: string) =>
   content ? `[${label}] ${content}` : `[${label}] No fresh data right now.`
-
-const formatMillions = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    compactDisplay: "short",
-  }).format(value * 1_000_000)
 
 const stripLinks = (value: string) =>
   value.replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim()
 
+const IMAGE_EXTENSIONS = [
+  ".png",".jpg",".jpeg",".gif",".webp",".bmp",".svg",".heic",".heif",
+]
+const isImageUrl = (value?: string | null) => {
+  const t = value?.trim()
+  if (!t || !/^https?:\/\//i.test(t)) return false
+  try {
+    const p = new URL(t).pathname.toLowerCase()
+    return IMAGE_EXTENSIONS.some(e => p.endsWith(e))
+  } catch { return false }
+}
+
+// -----------------------------------------------------------------
+// Fetchers
+// -----------------------------------------------------------------
+const fetchGoogle = async (cleanQuery: string): Promise<GoogleResponse | null> => {
+  const serperKey = import.meta.env.VITE_SERPER_KEY
+  if (!serperKey) return null
+  const resp = await fetch(SERPER_API, {
+    method: "POST",
+    headers: {
+      "X-API-KEY": serperKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ q: cleanQuery }),
+  })
+  if (!resp.ok) throw new Error(`Serper ${resp.status}`)
+  return (await resp.json()) as GoogleResponse
+}
+
+const fetchReddit = async (cleanQuery: string): Promise<RedditPost[]> => {
+  const params = new URLSearchParams({ q: cleanQuery })
+  const resp = await fetch(`${REDDIT_PROXY_URL}?${params}`, {
+    headers: { Accept: "application/json" },
+  })
+  if (!resp.ok) throw new Error(`Reddit ${resp.status}`)
+  const raw = await resp.text()
+  let payload: any
+  try { payload = JSON.parse(raw) } catch { throw new Error("Reddit non-JSON") }
+  const children = payload?.data?.children ?? []
+  if (!Array.isArray(children)) throw new Error("Reddit shape")
+  return children
+    .map((c: any) => c?.data)
+    .filter(Boolean)
+    .map((e: any) => {
+      let permalink = e?.permalink ?? ""
+      if (!permalink && e?.url) {
+        try { permalink = new URL(e.url).pathname } catch {}
+      }
+      return {
+        id: e?.id ?? crypto.randomUUID(),
+        title: e?.title ?? "Untitled",
+        selftext: e?.selftext ?? "",
+        permalink,
+        url: e?.url ?? "",
+        author: e?.author ?? "unknown",
+        created_utc: e?.created_utc ?? 0,
+        num_comments: e?.num_comments ?? 0,
+        score: e?.score ?? 0,
+        subreddit: e?.subreddit ?? "",
+      } as RedditPost
+    })
+}
+
+const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
+  const rapidKey = import.meta.env.VITE_RAPIDAPI_KEY
+  if (!rapidKey) return []
+  const resp = await fetch(
+    `${JSEARCH_API}?query=${encodeURIComponent(cleanQuery)}&page=1&num_pages=1&country=us&date_posted=all`,
+    {
+      headers: {
+        "x-rapidapi-key": rapidKey,
+        "x-rapidapi-host": JSEARCH_API_HOST,
+        Accept: "application/json",
+      },
+    }
+  )
+  if (!resp.ok) throw new Error(`JSearch ${resp.status}`)
+  const { data } = (await resp.json()) as { data?: JobResult[] }
+  return Array.isArray(data) ? data : []
+}
+
+const fetchGrok = async (cleanQuery: string): Promise<{
+  posts: XPost[]
+  ai: AIInsight | null
+}> => {
+  const xaiKey = import.meta.env.VITE_XAI_API_KEY
+  if (!xaiKey) return { posts: [], ai: null }
+
+  try {
+    const resp = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${xaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "grok-3-mini",
+        messages: [
+          {
+            role: "system",
+            content: "Return ONLY JSON: { posts: [...], ai: {summary, takeaways[3], sentiment} }",
+          },
+          {
+            role: "user",
+            content: `Search X for "${cleanQuery}" (latest, limit 10) and give a short AI summary.`,
+          },
+        ],
+        max_tokens: 2500,
+        temperature: 0.2,
+      }),
+    })
+
+    if (!resp.ok) throw new Error(`xAI ${resp.status}`)
+    const { choices } = await resp.json()
+    const content = choices[0].message.content
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error("No JSON from Grok")
+    const { posts = [], ai = null } = JSON.parse(jsonMatch[0])
+    return { posts, ai }
+  } catch (e) {
+    console.warn("Grok fetch failed:", e)
+    return { posts: [], ai: null }
+  }
+}
+
+// -----------------------------------------------------------------
+// fetchEcho
+// -----------------------------------------------------------------
 export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   const cleanQuery = query.trim()
   if (!cleanQuery) return null
 
-  const serperKey = import.meta.env.VITE_SERPER_KEY
-  const rapidKey = import.meta.env.VITE_RAPIDAPI_KEY
+  const hasKeys = import.meta.env.VITE_SERPER_KEY || 
+                  import.meta.env.VITE_RAPIDAPI_KEY || 
+                  import.meta.env.VITE_XAI_API_KEY
 
-  if (!serperKey && !rapidKey) {
-    console.warn(
-      "EchoThread fetch skipped: set VITE_SERPER_KEY and/or VITE_RAPIDAPI_KEY in your .env file."
-    )
+  if (!hasKeys) {
+    console.warn("Set at least one API key")
     return null
   }
 
-
-  
-  const fetchGoogle = async (): Promise<GoogleResponse | null> => {
-    if (!serperKey) return null
-    const response = await fetch(SERPER_API, {
-      method: "POST",
-      headers: {
-        "X-API-KEY": serperKey,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ q: cleanQuery }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`Serper request failed (${response.status})`)
-    }
-
-    return (await response.json()) as GoogleResponse
-  }
-
-  const fetchReddit = async (): Promise<RedditPost[] | null> => {
-    const params = new URLSearchParams({
-      q: cleanQuery,
-    })
-
-    const response = await fetch(`${REDDIT_PROXY_URL}?${params.toString()}`, {
-      headers: { Accept: "application/json" },
-    })
-
-    if (!response.ok) {
-      throw new Error(`Reddit search request failed (${response.status})`)
-    }
-
-    const raw = await response.text()
-    let payload: any
-    try {
-      payload = JSON.parse(raw)
-    } catch (error) {
-      throw new Error("Reddit proxy returned non-JSON payload.")
-    }
-    const children = payload?.data?.children ?? []
-    if (!Array.isArray(children)) {
-      throw new Error("Unexpected Reddit response shape.")
-    }
-
-    return children
-      .map((child: any) => child?.data)
-      .filter(Boolean)
-      .map((entry: any) => {
-        let permalink = entry?.permalink ?? ""
-        if (!permalink && entry?.url) {
-          try {
-            const url = new URL(entry.url)
-            permalink = url.pathname
-          } catch {
-            permalink = ""
-          }
-        }
-
-        return {
-          id: entry?.id ?? crypto.randomUUID(),
-          title: entry?.title ?? "Untitled post",
-          selftext: entry?.selftext ?? "",
-          permalink,
-          url: entry?.url ?? "",
-          author: entry?.author ?? "unknown",
-          created_utc: entry?.created_utc ?? 0,
-          num_comments: entry?.num_comments ?? 0,
-          score: entry?.score ?? 0,
-          subreddit: entry?.subreddit ?? "",
-        } as RedditPost
-      })
-  }
-
-const fetchX = async (): Promise<XPost[]> => {
-  if (!cleanQuery) return []
-
-  const fetchFrom = async (baseUrl: string): Promise<XPost[] | null> => {
-    try {
-      const params = new URLSearchParams({ q: cleanQuery })
-      const response = await fetch(`${baseUrl}?${params.toString()}`, {
-        headers: { Accept: "application/json" },
-      })
-
-      const raw = await response.text()
-      if (!response.ok) {
-        console.warn(
-          `[X proxy] HTTP ${response.status}: ${raw.slice(0, 120)}`
-        )
-        return null
-      }
-
-      const trimmed = raw.trim()
-      if (
-        trimmed.startsWith("function ") ||
-        trimmed.startsWith("export default") ||
-        trimmed.startsWith("<!DOCTYPE")
-      ) {
-        console.warn("[X proxy] Received source instead of JSON; falling back.")
-        return null
-      }
-
-      let payload: any
-      try {
-        payload = JSON.parse(raw)
-      } catch {
-        console.warn("[X proxy] Non-JSON payload:", raw.slice(0, 200))
-        return null
-      }
-
-      const posts = Array.isArray(payload?.data) ? payload.data : []
-      if (payload?.meta?.fallback) {
-        console.warn("[X proxy] Using fallback data:", payload.meta.message)
-      }
-
-      return posts.map((post: any, index: number) => ({
-        id:
-          post?.id ||
-          globalThis.crypto?.randomUUID?.() ||
-          `x-post-${Date.now()}-${index}`,
-        text: stripLinks(post?.text || post?.content || "No text"),
-        user: {
-          name: post?.user?.name || post?.author?.name || post?.author || "Unknown",
-          username: post?.user?.username || post?.username || "unknown",
-        },
-        url: post?.url || (post?.id ? `https://x.com/i/status/${post.id}` : "#"),
-        created_at: post?.created_at || post?.timestamp || new Date().toISOString(),
-        likes: post?.likes ?? post?.like_count ?? 0,
-        replies: post?.replies ?? post?.reply_count ?? 0,
-      }))
-    } catch (error) {
-      console.warn("X feed fetch failed", error)
-      return null
-    }
-  }
-
-  let posts = await fetchFrom(X_PROXY_URL)
-  if (!posts && X_PROXY_URL === LOCAL_X_PROXY) {
-    posts = await fetchFrom(REMOTE_X_PROXY)
-  }
-  return posts ?? []
-}
-
-  const fetchJobs = async (): Promise<JobResult[]> => {
-    if (!rapidKey) return []
-    const response = await fetch(
-      `${JSEARCH_API}?query=${encodeURIComponent(
-        cleanQuery
-      )}&page=1&num_pages=1&country=us&date_posted=all`,
-      {
-        headers: {
-          "x-rapidapi-key": rapidKey,
-          "x-rapidapi-host": JSEARCH_API_HOST,
-          Accept: "application/json",
-        },
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error(`JSearch request failed (${response.status})`)
-    }
-
-    const payload = (await response.json()) as { data?: JobResult[] }
-    return Array.isArray(payload.data) ? payload.data : []
-  }
-
-  const [googleResult, redditResult, xResult, jobResult] = await Promise.allSettled([
-    fetchGoogle(),
-    fetchReddit(),
-    fetchX(),
-    fetchJobs(),
+  const [gResult, rResult, xResult, jResult] = await Promise.allSettled([
+    fetchGoogle(cleanQuery),
+    fetchReddit(cleanQuery),
+    fetchGrok(cleanQuery),
+    fetchJobs(cleanQuery),
   ])
 
-  if (googleResult.status === "rejected") {
-    console.warn("Google echo fetch failed", googleResult.reason)
-  }
-  if (redditResult.status === "rejected") {
-    console.warn("Reddit echo fetch failed", redditResult.reason)
-  }
-  if (xResult.status === "rejected") {
-    console.warn("X feed fetch failed", xResult.reason)
-  }
-  if (jobResult.status === "rejected") {
-    console.warn("JSearch echo fetch failed", jobResult.reason)
-  }
+  if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
+  if (rResult.status === "rejected") console.warn("Reddit:", rResult.reason)
+  if (xResult.status === "rejected") console.warn("Grok:", xResult.reason)
+  if (jResult.status === "rejected") console.warn("Jobs:", jResult.reason)
 
-  const google = googleResult.status === "fulfilled" ? googleResult.value : null
-  const reddit = redditResult.status === "fulfilled" ? redditResult.value ?? [] : []
-  const xPosts = xResult.status === "fulfilled" ? xResult.value ?? [] : []
-  const jobs = jobResult.status === "fulfilled" ? jobResult.value : []
+  const google = gResult.status === "fulfilled" ? gResult.value : null
+  const reddit = rResult.status === "fulfilled" ? rResult.value ?? [] : []
+  const { posts: xPosts, ai } = xResult.status === "fulfilled" ? xResult.value : { posts: [], ai: null }
+  const jobs = jResult.status === "fulfilled" ? jResult.value : []
 
-  const hasNews = google && (google.organic?.length ?? 0) > 0
-  const hasReddit = reddit.length > 0
-  const hasX = xPosts.length > 0
-  const hasJobs = jobs.length > 0
+  const hasAny = google?.organic?.length || reddit.length || xPosts.length || jobs.length
+  if (!hasAny) return null
 
-  if (!hasNews && !hasReddit && !hasX && !hasJobs) {
-    return null
-  }
-
-  return {
-    google,
-    reddit,
-    xPosts,
-    jobs,
-  }
+  return { google, reddit, xPosts, jobs, ai }
 }
 
-const IMAGE_EXTENSIONS = [
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".bmp",
-  ".svg",
-  ".heic",
-  ".heif",
-]
-
-const isImageUrl = (value?: string | null) => {
-  const trimmed = value?.trim()
-  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return false
-  try {
-    const url = new URL(trimmed)
-    const lowerPath = url.pathname.toLowerCase()
-    return IMAGE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))
-  } catch {
-    return false
-  }
-}
-
+// -----------------------------------------------------------------
+// buildEchoInsight
+// -----------------------------------------------------------------
 export type EchoInsight = {
   id: string
   selection: string
@@ -368,6 +293,7 @@ export type EchoInsight = {
     source: string
     publishedAt: string
   }>
+  ai?: AIInsight | null
   timestamp: string
 }
 
@@ -375,116 +301,75 @@ export async function buildEchoInsight(
   selection: string,
   fetcher: typeof fetchEcho = fetchEcho
 ): Promise<EchoInsight | null> {
-  const cleanSelection = selection.trim()
-  if (!cleanSelection) return null
+  const clean = selection.trim()
+  if (!clean) return null
 
-  const payload = await fetcher(cleanSelection)
+  const payload = await fetcher(clean)
   if (!payload) return null
 
-  const redditPosts = payload.reddit ?? []
-  const xPosts = payload.xPosts ?? []
-  const news = payload.google?.organic ?? []
-  const jobs = payload.jobs ?? []
+  const { google, reddit, xPosts, jobs, ai } = payload
+  const news = google?.organic ?? []
 
-  const redditSummary = fallbackLine(
-    "Reddit",
-    redditPosts.length
-      ? `${redditPosts.length} new Reddit posts streaming in.`
-      : ""
-  )
-
-  const xSummary = fallbackLine(
-    "X",
-    xPosts.length ? `${xPosts.length} live conversations captured.` : ""
-  )
-
-  const newsSummary = fallbackLine(
-    "NEWS",
-    news.length ? `${news.length} breaking headlines` : ""
-  )
-
-  const marketSummary = `[MARKET] Token volume +${Math.floor(
-    Math.random() * 400 + 50
-  )}% - ${formatMillions(Math.random() * 0.3 + 0.05)} spike`
-
-  const jobSummary = fallbackLine(
-    "JOBS",
-    jobs.length ? `${jobs.length} openings surfaced via JSearch.` : ""
-  )
+  const redditSummary = fallbackLine("Reddit", reddit.length ? `${reddit.length} new Reddit posts.` : "")
+  const xSummary = fallbackLine("X", xPosts.length ? `${xPosts.length} live conversations.` : "")
+  const newsSummary = fallbackLine("Google", news.length ? `${news.length} results.` : "")
+  const marketSummary = `[MARKET] Token volume +${Math.floor(Math.random() * 400 + 50)}%`
+  const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
 
   const newsItems = news
-    .filter((item) => (item?.title || item?.snippet))
-    .map((item, index) => ({
-      id: item?.link || `${selection}-news-${index}`,
-      title: item?.title?.trim() || item?.snippet?.slice(0, 120) || "Untitled headline",
-      snippet: stripLinks(item?.snippet || "No snippet available"),
-      link: item?.link || "#",
-      source: item?.source?.trim() || "Unknown source",
-      publishedAt: item?.date?.trim() || "",
+    .filter(i => i?.title || i?.snippet)
+    .map((i, idx) => ({
+      id: i?.link || `${clean}-news-${idx}`,
+      title: (i?.title?.trim() || i?.snippet?.slice(0, 120) || "Untitled"),
+      snippet: stripLinks(i?.snippet || ""),
+      link: i?.link || "#",
+      source: i?.source?.trim() || "Unknown",
+      publishedAt: i?.date?.trim() || "",
     }))
 
-  const redditItems = redditPosts
-    .filter((post) => !((post.selftext || "").toLowerCase().includes("https://preview.redd.it")))
-    .map((post, index) => {
-      const permalink = post.permalink || ""
-      const externalUrl = post.url?.trim()
-      const safeExternalUrl =
-        externalUrl && !isImageUrl(externalUrl) ? externalUrl : ""
-      const rawSelftext = stripLinks(post.selftext?.trim() || "")
-
+  const redditItems = reddit
+    .filter(p => !(p.selftext?.toLowerCase().includes("https://preview.redd.it")))
+    .map((p, idx) => {
+      const safeUrl = p.url && !isImageUrl(p.url) ? p.url : ""
       return {
-        id: post.id || `${selection}-reddit-${index}`,
-      title: post.title?.trim() || "Untitled post",
-      author: post.author || "unknown",
-      subreddit: post.subreddit || "",
-      permalink,
-      url: safeExternalUrl,
-      createdAt: post.created_utc ?? 0,
-      score: post.score ?? 0,
-      commentCount: post.num_comments ?? 0,
-      selftext: isImageUrl(rawSelftext) ? "" : rawSelftext,
-    }
+        id: p.id || `${clean}-reddit-${idx}`,
+        title: p.title?.trim() || "Untitled",
+        author: p.author || "unknown",
+        subreddit: p.subreddit || "",
+        permalink: p.permalink || "",
+        url: safeUrl,
+        createdAt: p.created_utc ?? 0,
+        score: p.score ?? 0,
+        commentCount: p.num_comments ?? 0,
+        selftext: isImageUrl(p.selftext) ? "" : stripLinks(p.selftext || ""),
+      }
     })
 
-   
-  const xItems = xPosts.map((post, index) => ({
-    id: post.id || `${selection}-x-${index}`,
-    text: stripLinks(post.text || "No post text provided."),
-    author: post.user?.name || post.user?.username || "Unknown",
-    username: post.user?.username || "unknown",
-    url: post.url || (post.id ? `https://x.com/i/status/${post.id}` : "#"),
-    publishedAt: post.created_at || "",
-    likes: post.likes ?? 0,
-    replies: post.replies ?? 0,
+  const xItems = xPosts.map((p, idx) => ({
+    id: p.id || `${clean}-x-${idx}`,
+    text: stripLinks(p.text || "No text"),
+    author: p.user?.name || p.user?.username || "Unknown",
+    username: p.user?.username || "unknown",
+    url: p.url || (p.id ? `https://x.com/i/status/${p.id}` : "#"),
+    publishedAt: p.created_at || "",
+    likes: p.likes ?? 0,
+    replies: p.replies ?? 0,
   }))
-   
- /*
-  const xItems = xPosts.map((post, index) => ({
-  id: post.id || `${selection}-x-${index}`,
-  text: stripLinks(post.text || "No post text provided."),
-  author: post.user?.name || post.user?.username || "Unknown",
-  username: post.user?.username || "unknown",
-  url: post.url || `https://x.com/i/status/${post.id}`,
-  publishedAt: post.created_at || "",
-  likes: post.likes || 0,
-  replies: post.replies || 0
-}))
- */
 
-  const jobItems = jobs.map((job, index) => ({
-    id: job.job_id || job.job_apply_link || `${selection}-job-${index}`,
-    title: job.job_title || "Untitled role",
-    employer: job.employer_name || "Unknown employer",
-    location: [job.job_city, job.job_country].filter(Boolean).join(", "),
-    postedAt: job.job_posted_at_datetime_utc || "",
-    description: stripLinks(job.job_description || "No description available."),
-    applyLink: job.job_apply_link || "#",
-    employmentType: job.job_employment_type || "",
+  const jobItems = jobs.map((j, idx) => ({
+    id: j.job_id || j.job_apply_link || `${clean}-job-${idx}`,
+    title: j.job_title || "Untitled",
+    employer: j.employer_name || "Unknown",
+    location: [j.job_city, j.job_country].filter(Boolean).join(", "),
+    postedAt: j.job_posted_at_datetime_utc || "",
+    description: stripLinks(j.job_description || ""),
+    applyLink: j.job_apply_link || "#",
+    employmentType: j.job_employment_type || "",
   }))
 
   return {
     id: `echo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-    selection: cleanSelection,
+    selection: clean,
     redditSummary,
     redditItems,
     xSummary,
@@ -494,7 +379,7 @@ export async function buildEchoInsight(
     jobSummary,
     jobItems,
     newsItems,
+    ai,
     timestamp: new Date().toISOString(),
-
   }
 }

@@ -15,7 +15,7 @@ type SectionKey = "reddit" | "x" | "news" | "jobs" | "market"
 const SECTION_LABELS: Record<SectionKey, string> = {
   reddit: "Reddit",
   x: "X",
-  news: "News",
+  news: "Google",
   jobs: "Jobs",
   market: "Market pulse",
 }
@@ -295,42 +295,44 @@ export default function App() {
         </aside>
 
         <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl overflow-hidden h-full flex flex-col">
-          <div className="px-6 lg:px-8 py-6 border-b border-white/10 space-y-4">
-            <div>
-              <h2 className="text-2xl font-semibold">Editor canvas</h2>
-              <p className="text-sm text-white/70 mt-1">
-                Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
-              </p>
+          <div className="px-6 lg:px-8 py-6 border-b border-white/10 flex flex-col gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-semibold">Editor canvas</h2>
+                <p className="text-sm text-white/70 mt-1">
+                  Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
+                </p>
+              </div>
+              <motion.div
+                initial={{ scale: 0, rotate: -360 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 260, damping: 20 }}
+                className="flex justify-end"
+              >
+                <Button
+                  onClick={handleEcho}
+                  disabled={isFetching}
+                  className="rounded-full w-20 h-20 lg:w-24 lg:h-24 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-3xl font-black flex items-center justify-center disabled:opacity-70"
+                  aria-label="Trigger echo"
+                >
+                  {isFetching ? (
+                    <Loader2 className="w-8 h-8 lg:w-10 lg:h-10 animate-spin" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 leading-tight text-center">
+                      <span className="text-[11px] lg:text-xs font-semibold tracking-wide text-white/80">
+                        {echoCount}
+                      </span>
+                      <Waves className="w-10 h-10 lg:w-14 lg:h-14" />
+                    </div>
+                  )}
+                </Button>
+              </motion.div>
             </div>
           </div>
           <div className="p-6 sm:p-8 flex-1 flex flex-col gap-5">
-            <div className="flex-1 overflow-y-auto max-h-[460px]">
+            <div className="flex-1 overflow-y-auto max-h-[360px] max-w-[90%]">
               <EditorContent editor={editor} />
             </div>
-            <motion.div
-              initial={{ scale: 0, rotate: -360 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 260, damping: 20 }}
-              className="flex justify-end"
-            >
-              <Button
-                onClick={handleEcho}
-                disabled={isFetching}
-                className="rounded-full w-24 h-24 lg:w-28 lg:h-28 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-4xl font-black flex items-center justify-center disabled:opacity-70"
-                aria-label="Trigger echo"
-              >
-                {isFetching ? (
-                  <Loader2 className="w-10 h-10 lg:w-12 lg:h-12 animate-spin" />
-                ) : (
-                  <div className="flex flex-col items-center gap-2 leading-tight text-center">
-                    <span className="text-xs lg:text-sm font-semibold tracking-wide text-white/80">
-                      {echoCount}
-                    </span>
-                    <Waves className="w-14 h-14 lg:w-20 lg:h-20" />
-                  </div>
-                )}
-              </Button>
-            </motion.div>
           </div>
         </div>
       </div>
@@ -498,12 +500,12 @@ export default function App() {
                       </section>
                     )}
 
-                  {sectionVisibility.news && (
-                    <section className="space-y-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
-                        News
-                      </h4>
-                      <p>{echo.newsSummary}</p>
+                    {sectionVisibility.news && (
+                      <section className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                          Google
+                        </h4>
+                        <p>{echo.newsSummary}</p>
                       {echo.newsItems.length > 0 && (
                         <div className="space-y-2">
                           {echo.newsItems
@@ -542,15 +544,15 @@ export default function App() {
                             })}
                           {echo.newsItems.length >
                             (visibleNewsCounts[echo.id] ?? INITIAL_BATCH) && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs text-purple-200"
-                              onClick={() => loadMoreNews(echo.id)}
-                            >
-                              Read more news
-                            </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-purple-200"
+                                onClick={() => loadMoreNews(echo.id)}
+                              >
+                                Read more Google results
+                              </Button>
                           )}
                         </div>
                       )}
