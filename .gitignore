@@ -3,4 +3,10 @@ node_modules
 dist
 .eslintcache
 .vercel
-.env.local
+
+# Environment files (use .env.example for reference)
+.env
+.env.*
+!.env.example
+src/.env
+src/.env.*
