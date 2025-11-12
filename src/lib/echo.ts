@@ -161,116 +161,24 @@ const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
 }
 
 
-const fetchX = async (cleanQuery: string): Promise<XPost[]> => {
-  if (!cleanQuery) return buildXPlaceholder("your latest note")
-  return buildXPlaceholder(cleanQuery)
-}
-
-const fetchGrok = async (cleanQuery: string): Promise<{
-  posts: XPost[]
-  ai: AIInsight | null
-}> => {
-  const xaiKey = import.meta.env.VITE_XAI_API_KEY
-  if (!xaiKey) return { posts: [], ai: null }
-
+const fetchGrok = async (cleanQuery: string): Promise<{ posts: XPost[]; ai: AIInsight | null }> => {
+  if (!cleanQuery) return { posts: buildXPlaceholder("your latest note"), ai: null }
   try {
-    const resp = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${xaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "grok-3-mini",
-        messages: [
-          {
-            role: "system",
-            content: `
-You are a JSON-only API. 
-Return ONLY valid JSON with no extra text, code blocks, or explanations.
-Structure:
-{
-  "posts": [
-    {
-      "id": "string",
-      "text": "string",
-      "user": { "name": "string", "username": "string" },
-      "url": "https://x.com/...",
-      "created_at": "2025-...",
-      "likes": 123,
-      "replies": 45
+    const resp = await fetch(`/api/grok?q=${encodeURIComponent(cleanQuery)}`)
+    if (!resp.ok) throw new Error("Grok proxy failed")
+    const { posts, ai } = await resp.json()
+    const normalized =
+      Array.isArray(posts) && posts.length > 0 ? posts : buildXPlaceholder(cleanQuery)
+    return {
+      posts: normalized,
+      ai: ai ?? null,
     }
-  ],
-  "ai": {
-    "summary": "string",
-    "takeaways": ["string", "string", "string"],
-    "sentiment": "positive" | "negative" | "neutral"
+  } catch (error) {
+    console.warn("Grok proxy failed:", error)
+    return { posts: buildXPlaceholder(cleanQuery), ai: null }
   }
 }
-`.trim(),
-          },
-          {
-            role: "user",
-            content: `Search X for "${cleanQuery}" — latest 10 posts. Include AI summary.`,
-          },
-        ],
-        max_tokens: 2000,
-        temperature: 0.1,  // ← FIXED: was "temperature::$_0.1"
-      }),
-    })
 
-    if (!resp.ok) {
-      const err = await resp.text()
-      throw new Error(`xAI ${resp.status}: ${err}`)
-    }
-
-    const { choices } = await resp.json()
-    const content = choices[0].message.content.trim()
-
-    // Extract JSON even if wrapped in ```json or text
-    const jsonStr = content
-      .replace(/```json\s*/g, "")
-      .replace(/```\s*$/g, "")
-      .match(/\{[\s\S]*\}/)?.[0]
-
-    if (!jsonStr) throw new Error("No JSON in Grok response")
-
-    const parsed = JSON.parse(jsonStr)
-
-    // Normalize posts
-    const posts: XPost[] = Array.isArray(parsed.posts)
-      ? parsed.posts.map((p: any) => ({
-          id: p.id ?? null,
-          text: p.text ?? "No text",
-          user: {
-            name: p.user?.name ?? p.user?.username ?? "Unknown",
-            username: p.user?.username ?? "unknown",
-          },
-          url: p.url ?? (p.id ? `https://x.com/i/status/${p.id}` : "#"),
-          created_at: p.created_at ?? "",
-          likes: p.likes ?? 0,
-          replies: p.replies ?? 0,
-        }))
-      : []
-
-    const ai: AIInsight | null = parsed.ai
-      ? {
-          summary: parsed.ai.summary ?? "",
-          takeaways: Array.isArray(parsed.ai.takeaways)
-            ? parsed.ai.takeaways.slice(0, 3)
-            : [],
-          sentiment: ["positive", "negative", "neutral"].includes(parsed.ai.sentiment)
-            ? parsed.ai.sentiment
-            : "neutral",
-        }
-      : null
-
-    return { posts, ai }
-  } catch (e) {
-    console.warn("Grok fetch failed:", e)
-    return { posts: [], ai: null }
-  }
-}
 
 const buildXPlaceholder = (query: string): XPost[] => [
   {
@@ -303,25 +211,25 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return null
   }
 
-  const [gResult, rResult, xResult, grokResult, jResult] = await Promise.allSettled([
+  const [gResult, rResult, grokResult, jResult] = await Promise.allSettled([
     fetchGoogle(cleanQuery),
     fetchReddit(cleanQuery),
-    fetchX(cleanQuery),
     fetchGrok(cleanQuery),
     fetchJobs(cleanQuery),
   ])
 
   if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
   if (rResult.status === "rejected") console.warn("Reddit:", rResult.reason)
-  if (xResult.status === "rejected") console.warn("X feed:", xResult.reason)
   if (grokResult.status === "rejected") console.warn("Grok:", grokResult.reason)
   if (jResult.status === "rejected") console.warn("Jobs:", jResult.reason)
 
   const google = gResult.status === "fulfilled" ? gResult.value : null
   const reddit = rResult.status === "fulfilled" ? rResult.value ?? [] : []
-  const xPosts = xResult.status === "fulfilled" ? xResult.value ?? [] : []
   const { posts: grokPosts, ai: grokAI } =
-    grokResult.status === "fulfilled" ? grokResult.value : { posts: [], ai: null }
+    grokResult.status === "fulfilled"
+      ? grokResult.value
+      : { posts: buildXPlaceholder(cleanQuery), ai: null }
+  const xPosts = grokPosts
   const jobs = jResult.status === "fulfilled" ? jResult.value : []
 
   const hasAny =
@@ -363,16 +271,6 @@ export type EchoInsight = {
   }>
   grokSummary: string
   grokAI: AIInsight | null
-  grokItems: Array<{
-    id: string
-    text: string
-    author: string
-    username: string
-    url: string
-    publishedAt: string
-    likes: number
-    replies: number
-  }>
   newsSummary: string
   marketSummary: string
   jobSummary: string
@@ -458,17 +356,6 @@ export async function buildEchoInsight(
     likes: p.likes ?? 0,
     replies: p.replies ?? 0,
   }))
-  const grokItems = grokPosts.map((p, idx) => ({
-    id: p.id || `${clean}-grok-${idx}`,
-    text: stripLinks(p.text || "No text"),
-    author: p.user?.name || p.user?.username || "Unknown",
-    username: p.user?.username || "unknown",
-    url: p.url || (p.id ? `https://x.com/i/status/${p.id}` : "#"),
-    publishedAt: p.created_at || "",
-    likes: p.likes ?? 0,
-    replies: p.replies ?? 0,
-  }))
-
   const jobItems = jobs.map((j, idx) => ({
     id: j.job_id || j.job_apply_link || `${clean}-job-${idx}`,
     title: j.job_title || "Untitled",
@@ -489,7 +376,6 @@ export async function buildEchoInsight(
     xItems,
     grokSummary,
     grokAI,
-    grokItems,
     newsSummary,
     marketSummary,
     jobSummary,

@@ -60,7 +60,6 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [customQuery, setCustomQuery] = useState("")
   const [visibleRedditCounts, setVisibleRedditCounts] = useState<Record<string, number>>({})
-  const [visibleGrokCounts, setVisibleGrokCounts] = useState<Record<string, number>>({})
   const [visibleXCounts, setVisibleXCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
@@ -91,13 +90,6 @@ export default function App() {
   })
 
   useEffect(() => {
-    setVisibleGrokCounts((prev) => {
-      const next: Record<string, number> = {}
-      for (const echo of echoes) {
-        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
-      }
-      return next
-    })
     setVisibleXCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
@@ -218,11 +210,6 @@ export default function App() {
       [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
     }))
 
-  const loadMoreGrok = (id: string) =>
-    setVisibleGrokCounts((prev) => ({
-      ...prev,
-      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
-    }))
 
   const loadMoreNews = (id: string) =>
     setVisibleNewsCounts((prev) => ({
@@ -291,7 +278,7 @@ export default function App() {
           </div>
           <div className="p-6 sm:p-8 space-y-6 flex-1 flex flex-col">
             <div className="grid gap-4">
-              {(["reddit", "x", "news", "jobs", "market"] as SectionKey[]).map((section) => (
+              {(["reddit", "x", "grok", "news", "jobs", "market"] as SectionKey[]).map((section) => (
                 <label
                   key={section}
                   className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80"
@@ -529,55 +516,10 @@ export default function App() {
                             ))}
                           </ul>
                         )}
-                        {echo.grokItems.length > 0 && (
-                          <div className="space-y-2">
-                            {echo.grokItems
-                              .slice(0, visibleGrokCounts[echo.id] ?? INITIAL_BATCH)
-                              .map((item) => (
-                                <article
-                                  key={item.id}
-                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
-                                >
-                                  <p className="text-sm text-purple-50">
-                                    {truncate(item.text || "No content available.")}
-                                  </p>
-                                  <p className="text-[11px] uppercase tracking-wide text-purple-200/60 flex flex-wrap gap-1">
-                                    <span>{item.author || "Unknown"}</span>
-                                    {item.username && <span>• @{item.username}</span>}
-                                    {item.publishedAt && (
-                                      <span>
-                                        • {new Date(item.publishedAt).toLocaleString()}
-                                      </span>
-                                    )}
-                                  </p>
-                                  <p className="text-[11px] text-purple-200/70">
-                                    ❤️ {item.likes ?? 0} • 💬 {item.replies ?? 0}
-                                  </p>
-                                  {item.url && item.url !== "#" && (
-                                    <a
-                                      href={item.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-xs text-purple-200 underline"
-                                    >
-                                      View on X
-                                    </a>
-                                  )}
-                                </article>
-                              ))}
-                            {echo.grokItems.length >
-                              (visibleGrokCounts[echo.id] ?? INITIAL_BATCH) && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-purple-200"
-                                onClick={() => loadMoreGrok(echo.id)}
-                              >
-                                Read more Grok posts
-                              </Button>
-                            )}
-                          </div>
+                        {echo.grokAI?.sentiment && (
+                          <p className="text-[11px] uppercase tracking-wide text-purple-200/60">
+                            Sentiment: {echo.grokAI.sentiment}
+                          </p>
                         )}
                       </section>
                     )}
