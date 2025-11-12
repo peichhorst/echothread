@@ -159,6 +159,7 @@ const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
   return Array.isArray(data) ? data : []
 }
 
+
 const fetchGrok = async (cleanQuery: string): Promise<{
   posts: XPost[]
   ai: AIInsight | null
@@ -178,30 +179,95 @@ const fetchGrok = async (cleanQuery: string): Promise<{
         messages: [
           {
             role: "system",
-            content: "Return ONLY JSON: { posts: [...], ai: {summary, takeaways[3], sentiment} }",
+            content: `
+You are a JSON-only API. 
+Return ONLY valid JSON with no extra text, code blocks, or explanations.
+Structure:
+{
+  "posts": [
+    {
+      "id": "string",
+      "text": "string",
+      "user": { "name": "string", "username": "string" },
+      "url": "https://x.com/...",
+      "created_at": "2025-...",
+      "likes": 123,
+      "replies": 45
+    }
+  ],
+  "ai": {
+    "summary": "string",
+    "takeaways": ["string", "string", "string"],
+    "sentiment": "positive" | "negative" | "neutral"
+  }
+}
+`.trim(),
           },
           {
             role: "user",
-            content: `Search X for "${cleanQuery}" (latest, limit 10) and give a short AI summary.`,
+            content: `Search X for "${cleanQuery}" — latest 10 posts. Include AI summary.`,
           },
         ],
-        max_tokens: 2500,
-        temperature: 0.2,
+        max_tokens: 2000,
+        temperature: 0.1,  // ← FIXED: was "temperature::$_0.1"
       }),
     })
 
-    if (!resp.ok) throw new Error(`xAI ${resp.status}`)
+    if (!resp.ok) {
+      const err = await resp.text()
+      throw new Error(`xAI ${resp.status}: ${err}`)
+    }
+
     const { choices } = await resp.json()
-    const content = choices[0].message.content
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error("No JSON from Grok")
-    const { posts = [], ai = null } = JSON.parse(jsonMatch[0])
+    const content = choices[0].message.content.trim()
+
+    // Extract JSON even if wrapped in ```json or text
+    const jsonStr = content
+      .replace(/```json\s*/g, "")
+      .replace(/```\s*$/g, "")
+      .match(/\{[\s\S]*\}/)?.[0]
+
+    if (!jsonStr) throw new Error("No JSON in Grok response")
+
+    const parsed = JSON.parse(jsonStr)
+
+    // Normalize posts
+    const posts: XPost[] = Array.isArray(parsed.posts)
+      ? parsed.posts.map((p: any) => ({
+          id: p.id ?? null,
+          text: p.text ?? "No text",
+          user: {
+            name: p.user?.name ?? p.user?.username ?? "Unknown",
+            username: p.user?.username ?? "unknown",
+          },
+          url: p.url ?? (p.id ? `https://x.com/i/status/${p.id}` : "#"),
+          created_at: p.created_at ?? "",
+          likes: p.likes ?? 0,
+          replies: p.replies ?? 0,
+        }))
+      : []
+
+    const ai: AIInsight | null = parsed.ai
+      ? {
+          summary: parsed.ai.summary ?? "",
+          takeaways: Array.isArray(parsed.ai.takeaways)
+            ? parsed.ai.takeaways.slice(0, 3)
+            : [],
+          sentiment: ["positive", "negative", "neutral"].includes(parsed.ai.sentiment)
+            ? parsed.ai.sentiment
+            : "neutral",
+        }
+      : null
+
     return { posts, ai }
   } catch (e) {
     console.warn("Grok fetch failed:", e)
     return { posts: [], ai: null }
   }
 }
+
+
+
 
 // -----------------------------------------------------------------
 // fetchEcho
