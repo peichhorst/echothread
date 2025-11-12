@@ -63,8 +63,9 @@ export type EchoPayload = {
   google: GoogleResponse | null
   reddit: RedditPost[]
   xPosts: XPost[]
+  grokPosts: XPost[]
+  grokAI: AIInsight | null
   jobs: JobResult[]
-  ai?: AIInsight | null
 }
 
 // -----------------------------------------------------------------
@@ -159,6 +160,11 @@ const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
   return Array.isArray(data) ? data : []
 }
 
+
+const fetchX = async (cleanQuery: string): Promise<XPost[]> => {
+  if (!cleanQuery) return buildXPlaceholder("your latest note")
+  return buildXPlaceholder(cleanQuery)
+}
 
 const fetchGrok = async (cleanQuery: string): Promise<{
   posts: XPost[]
@@ -266,6 +272,18 @@ Structure:
   }
 }
 
+const buildXPlaceholder = (query: string): XPost[] => [
+  {
+    id: `x-placeholder-${Date.now()}`,
+    text: `Live X scan is offline. Still watching for mentions of "${query}".`,
+    user: { name: "Signal Relay", username: "echo-thread" },
+    url: "#",
+    created_at: new Date().toISOString(),
+    likes: 0,
+    replies: 0,
+  },
+]
+
 
 
 
@@ -285,27 +303,32 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return null
   }
 
-  const [gResult, rResult, xResult, jResult] = await Promise.allSettled([
+  const [gResult, rResult, xResult, grokResult, jResult] = await Promise.allSettled([
     fetchGoogle(cleanQuery),
     fetchReddit(cleanQuery),
+    fetchX(cleanQuery),
     fetchGrok(cleanQuery),
     fetchJobs(cleanQuery),
   ])
 
   if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
   if (rResult.status === "rejected") console.warn("Reddit:", rResult.reason)
-  if (xResult.status === "rejected") console.warn("Grok:", xResult.reason)
+  if (xResult.status === "rejected") console.warn("X feed:", xResult.reason)
+  if (grokResult.status === "rejected") console.warn("Grok:", grokResult.reason)
   if (jResult.status === "rejected") console.warn("Jobs:", jResult.reason)
 
   const google = gResult.status === "fulfilled" ? gResult.value : null
   const reddit = rResult.status === "fulfilled" ? rResult.value ?? [] : []
-  const { posts: xPosts, ai } = xResult.status === "fulfilled" ? xResult.value : { posts: [], ai: null }
+  const xPosts = xResult.status === "fulfilled" ? xResult.value ?? [] : []
+  const { posts: grokPosts, ai: grokAI } =
+    grokResult.status === "fulfilled" ? grokResult.value : { posts: [], ai: null }
   const jobs = jResult.status === "fulfilled" ? jResult.value : []
 
-  const hasAny = google?.organic?.length || reddit.length || xPosts.length || jobs.length
+  const hasAny =
+    (google?.organic?.length ?? 0) || reddit.length || xPosts.length || grokPosts.length || jobs.length
   if (!hasAny) return null
 
-  return { google, reddit, xPosts, jobs, ai }
+  return { google, reddit, xPosts, grokPosts, grokAI, jobs }
 }
 
 // -----------------------------------------------------------------
@@ -338,6 +361,18 @@ export type EchoInsight = {
     likes: number
     replies: number
   }>
+  grokSummary: string
+  grokAI: AIInsight | null
+  grokItems: Array<{
+    id: string
+    text: string
+    author: string
+    username: string
+    url: string
+    publishedAt: string
+    likes: number
+    replies: number
+  }>
   newsSummary: string
   marketSummary: string
   jobSummary: string
@@ -359,7 +394,6 @@ export type EchoInsight = {
     source: string
     publishedAt: string
   }>
-  ai?: AIInsight | null
   timestamp: string
 }
 
@@ -373,11 +407,14 @@ export async function buildEchoInsight(
   const payload = await fetcher(clean)
   if (!payload) return null
 
-  const { google, reddit, xPosts, jobs, ai } = payload
+  const { google, reddit, xPosts, grokPosts, grokAI, jobs } = payload
   const news = google?.organic ?? []
 
   const redditSummary = fallbackLine("Reddit", reddit.length ? `${reddit.length} new Reddit posts.` : "")
   const xSummary = fallbackLine("X", xPosts.length ? `${xPosts.length} live conversations.` : "")
+  const grokSummary = grokAI?.summary
+    ? `[GROK] ${grokAI.summary.trim()}`
+    : fallbackLine("Grok", grokPosts.length ? `${grokPosts.length} synthesized threads.` : "")
   const newsSummary = fallbackLine("Google", news.length ? `${news.length} results.` : "")
   const marketSummary = `[MARKET] Token volume +${Math.floor(Math.random() * 400 + 50)}%`
   const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
@@ -421,6 +458,16 @@ export async function buildEchoInsight(
     likes: p.likes ?? 0,
     replies: p.replies ?? 0,
   }))
+  const grokItems = grokPosts.map((p, idx) => ({
+    id: p.id || `${clean}-grok-${idx}`,
+    text: stripLinks(p.text || "No text"),
+    author: p.user?.name || p.user?.username || "Unknown",
+    username: p.user?.username || "unknown",
+    url: p.url || (p.id ? `https://x.com/i/status/${p.id}` : "#"),
+    publishedAt: p.created_at || "",
+    likes: p.likes ?? 0,
+    replies: p.replies ?? 0,
+  }))
 
   const jobItems = jobs.map((j, idx) => ({
     id: j.job_id || j.job_apply_link || `${clean}-job-${idx}`,
@@ -440,12 +487,14 @@ export async function buildEchoInsight(
     redditItems,
     xSummary,
     xItems,
+    grokSummary,
+    grokAI,
+    grokItems,
     newsSummary,
     marketSummary,
     jobSummary,
     jobItems,
     newsItems,
-    ai,
     timestamp: new Date().toISOString(),
   }
 }

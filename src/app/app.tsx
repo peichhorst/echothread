@@ -11,10 +11,11 @@ import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
 const INITIAL_BATCH = 5
 const SNIPPET_LIMIT = 500
 
-type SectionKey = "reddit" | "x" | "news" | "jobs" | "market"
+type SectionKey = "reddit" | "x" | "grok" | "news" | "jobs" | "market"
 const SECTION_LABELS: Record<SectionKey, string> = {
   reddit: "Reddit",
   x: "X",
+  grok: "Grok",
   news: "Google",
   jobs: "Jobs",
   market: "Market pulse",
@@ -59,12 +60,14 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [customQuery, setCustomQuery] = useState("")
   const [visibleRedditCounts, setVisibleRedditCounts] = useState<Record<string, number>>({})
+  const [visibleGrokCounts, setVisibleGrokCounts] = useState<Record<string, number>>({})
   const [visibleXCounts, setVisibleXCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
   const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>({
     reddit: true,
     x: true,
+    grok: true,
     news: true,
     jobs: true,
     market: true,
@@ -88,6 +91,13 @@ export default function App() {
   })
 
   useEffect(() => {
+    setVisibleGrokCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
     setVisibleXCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
@@ -204,6 +214,12 @@ export default function App() {
 
   const loadMoreX = (id: string) =>
     setVisibleXCounts((prev) => ({
+      ...prev,
+      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+    }))
+
+  const loadMoreGrok = (id: string) =>
+    setVisibleGrokCounts((prev) => ({
       ...prev,
       [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
     }))
@@ -493,6 +509,72 @@ export default function App() {
                                 onClick={() => loadMoreX(echo.id)}
                               >
                                 Read more X posts
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {sectionVisibility.grok && (
+                      <section className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                          Grok
+                        </h4>
+                        <p>{echo.grokSummary}</p>
+                        {echo.grokAI?.takeaways && echo.grokAI.takeaways.length > 0 && (
+                          <ul className="text-xs text-purple-200/80 list-disc list-inside space-y-1">
+                            {echo.grokAI.takeaways.map((item, idx) => (
+                              <li key={`${echo.id}-grok-tip-${idx}`}>{item}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {echo.grokItems.length > 0 && (
+                          <div className="space-y-2">
+                            {echo.grokItems
+                              .slice(0, visibleGrokCounts[echo.id] ?? INITIAL_BATCH)
+                              .map((item) => (
+                                <article
+                                  key={item.id}
+                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
+                                >
+                                  <p className="text-sm text-purple-50">
+                                    {truncate(item.text || "No content available.")}
+                                  </p>
+                                  <p className="text-[11px] uppercase tracking-wide text-purple-200/60 flex flex-wrap gap-1">
+                                    <span>{item.author || "Unknown"}</span>
+                                    {item.username && <span>• @{item.username}</span>}
+                                    {item.publishedAt && (
+                                      <span>
+                                        • {new Date(item.publishedAt).toLocaleString()}
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-[11px] text-purple-200/70">
+                                    ❤️ {item.likes ?? 0} • 💬 {item.replies ?? 0}
+                                  </p>
+                                  {item.url && item.url !== "#" && (
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-purple-200 underline"
+                                    >
+                                      View on X
+                                    </a>
+                                  )}
+                                </article>
+                              ))}
+                            {echo.grokItems.length >
+                              (visibleGrokCounts[echo.id] ?? INITIAL_BATCH) && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-purple-200"
+                                onClick={() => loadMoreGrok(echo.id)}
+                              >
+                                Read more Grok posts
                               </Button>
                             )}
                           </div>
