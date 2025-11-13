@@ -53,6 +53,29 @@ const formatDateTime = (value?: number | string | null) => {
   })
 }
 
+const formatPercentValue = (value?: number | null) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—"
+  const rounded = Math.round(value * 10) / 10
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`
+}
+
+const formatFractionPercent = (fraction?: number | null) =>
+  fraction === null || fraction === undefined ? "—" : formatPercentValue(fraction * 100)
+
+const formatChangeValue = (fraction?: number | null) => {
+  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return ""
+  const percent = Math.round(fraction * 10000) / 100
+  const sign = percent > 0 ? "+" : ""
+  return `${sign}${percent}%`
+}
+
+const formatVolumeValue = (value?: number | null) => {
+  if (!value || Number.isNaN(value)) return ""
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}k`
+  return `$${Math.round(value)}`
+}
+
 export default function App() {
   const [echoCount, setEchoCount] = useState(0)
   const [echoes, setEchoes] = useState<EchoInsight[]>([])
@@ -63,6 +86,7 @@ export default function App() {
   const [visibleXCounts, setVisibleXCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
+  const [visibleMarketCounts, setVisibleMarketCounts] = useState<Record<string, number>>({})
   const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>({
     reddit: true,
     x: true,
@@ -127,6 +151,13 @@ export default function App() {
       return next
     })
     setVisibleJobCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+    setVisibleMarketCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
         next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
@@ -217,11 +248,17 @@ export default function App() {
       [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
     }))
 
-  const loadMoreJobs = (id: string) =>
-    setVisibleJobCounts((prev) => ({
-      ...prev,
-      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
-    }))
+const loadMoreJobs = (id: string) =>
+  setVisibleJobCounts((prev) => ({
+    ...prev,
+    [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+  }))
+
+const loadMoreMarkets = (id: string) =>
+  setVisibleMarketCounts((prev) => ({
+    ...prev,
+    [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+  }))
 
   const toggleSection = (section: SectionKey) =>
     setSectionVisibility((prev) => ({
@@ -638,8 +675,90 @@ export default function App() {
                   )}
 
                   {sectionVisibility.market && (
-                    <section>
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        Market
+                      </h4>
                       <p>{echo.marketSummary}</p>
+                      {echo.marketItems.length > 0 && (
+                        <div className="space-y-2">
+                          {echo.marketItems
+                            .slice(0, visibleMarketCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((item) => {
+                              const closesAtDisplay = formatDateTime(item.closesAt)
+                              const probabilityDisplay = formatPercentValue(item.probability)
+                              const changeDisplay = formatChangeValue(item.change24h)
+                              const volumeDisplay = formatVolumeValue(item.volume24h)
+                              const bidDisplay = formatFractionPercent(item.bestBid)
+                              const askDisplay = formatFractionPercent(item.bestAsk)
+                              return (
+                                <article
+                                  key={item.id}
+                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-2"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                      <a
+                                        href={item.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-semibold text-purple-50 hover:text-white transition"
+                                      >
+                                        {item.title}
+                                      </a>
+                                      {item.group && (
+                                        <p className="text-[11px] uppercase tracking-wide text-purple-200/60">
+                                          {item.group}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {item.icon && (
+                                      <img
+                                        src={item.icon}
+                                        alt=""
+                                        className="w-10 h-10 rounded-lg object-cover border border-purple-400/20"
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-purple-200/80 flex flex-wrap gap-3">
+                                    <span className="font-semibold text-purple-50">
+                                      Odds {probabilityDisplay}
+                                    </span>
+                                    {changeDisplay && (
+                                      <span
+                                        className={
+                                          changeDisplay.startsWith("+")
+                                            ? "text-emerald-300"
+                                            : "text-rose-300"
+                                        }
+                                      >
+                                        {changeDisplay} 24h
+                                      </span>
+                                    )}
+                                    {volumeDisplay && <span>Vol {volumeDisplay}</span>}
+                                  </div>
+                                  <div className="text-[11px] text-purple-200/70 flex flex-wrap gap-3">
+                                    <span>Bid {bidDisplay}</span>
+                                    <span>Ask {askDisplay}</span>
+                                    {closesAtDisplay && <span>Closes {closesAtDisplay}</span>}
+                                  </div>
+                                </article>
+                              )
+                            })}
+                          {echo.marketItems.length >
+                            (visibleMarketCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreMarkets(echo.id)}
+                            >
+                              Track more markets
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </section>
                   )}
                 </div>

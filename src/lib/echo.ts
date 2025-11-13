@@ -4,6 +4,8 @@ const REDDIT_PROXY_URL =
   import.meta.env.VITE_REDDIT_PROXY_URL ?? "/api/reddit-search"
 const JOBS_PROXY_URL =
   import.meta.env.VITE_JOBS_PROXY_URL?.trim() || "/api/jobs"
+const POLYMARKET_PROXY_URL =
+  import.meta.env.VITE_POLYMARKET_PROXY_URL?.trim() || "/api/polymarket"
 
 // -----------------------------------------------------------------
 // Types
@@ -58,6 +60,25 @@ type JobResult = {
   job_employment_type?: string
 }
 
+type MarketContract = {
+  id?: string
+  question?: string
+  slug?: string
+  url?: string
+  icon?: string | null
+  probability?: number | null
+  bestBid?: number | null
+  bestAsk?: number | null
+  lastTradePrice?: number | null
+  change24h?: number | null
+  volume24h?: number | null
+  volume7d?: number | null
+  startDate?: string | null
+  endDate?: string | null
+  outcomes?: string[]
+  group?: string | null
+}
+
 export type EchoPayload = {
   google: GoogleResponse | null
   reddit: RedditPost[]
@@ -65,6 +86,7 @@ export type EchoPayload = {
   grokPosts: XPost[]
   grokAI: AIInsight | null
   jobs: JobResult[]
+  markets: MarketContract[]
 }
 
 // -----------------------------------------------------------------
@@ -172,6 +194,37 @@ const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
   return Array.isArray(data) ? data : []
 }
 
+const fetchMarkets = async (): Promise<MarketContract[]> => {
+  const endpoint = POLYMARKET_PROXY_URL.startsWith("http")
+    ? POLYMARKET_PROXY_URL
+    : `${POLYMARKET_PROXY_URL}`
+
+  const resp = await fetch(`${endpoint}?limit=12`, {
+    headers: { Accept: "application/json" },
+  })
+  const raw = await resp.text()
+
+  if (!resp.ok) {
+    let details = ""
+    try {
+      const parsed = JSON.parse(raw)
+      details = parsed?.error ? `: ${parsed.error}` : ""
+    } catch {
+      // ignore JSON parse error
+    }
+    throw new Error(`Polymarket proxy ${resp.status}${details}`)
+  }
+
+  try {
+    const payload = JSON.parse(raw) as { data?: MarketContract[] }
+    const list = payload?.data
+    if (!Array.isArray(list)) return []
+    return list
+  } catch {
+    throw new Error("Polymarket proxy non-JSON")
+  }
+}
+
 
 const fetchGrok = async (cleanQuery: string): Promise<{ posts: XPost[]; ai: AIInsight | null }> => {
   if (!cleanQuery) return { posts: buildXPlaceholder("your latest note"), ai: null }
@@ -223,17 +276,19 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return null
   }
 
-  const [gResult, rResult, grokResult, jResult] = await Promise.allSettled([
+  const [gResult, rResult, grokResult, jResult, mResult] = await Promise.allSettled([
     fetchGoogle(cleanQuery),
     fetchReddit(cleanQuery),
     fetchGrok(cleanQuery),
     fetchJobs(cleanQuery),
+    fetchMarkets(),
   ])
 
   if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
   if (rResult.status === "rejected") console.warn("Reddit:", rResult.reason)
   if (grokResult.status === "rejected") console.warn("Grok:", grokResult.reason)
   if (jResult.status === "rejected") console.warn("Jobs:", jResult.reason)
+  if (mResult.status === "rejected") console.warn("Markets:", mResult.reason)
 
   const google = gResult.status === "fulfilled" ? gResult.value : null
   const reddit = rResult.status === "fulfilled" ? rResult.value ?? [] : []
@@ -243,12 +298,18 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
       : { posts: buildXPlaceholder(cleanQuery), ai: null }
   const xPosts = grokPosts
   const jobs = jResult.status === "fulfilled" ? jResult.value : []
+  const markets = mResult.status === "fulfilled" ? mResult.value ?? [] : []
 
   const hasAny =
-    (google?.organic?.length ?? 0) || reddit.length || xPosts.length || grokPosts.length || jobs.length
+    (google?.organic?.length ?? 0) ||
+    reddit.length ||
+    xPosts.length ||
+    grokPosts.length ||
+    jobs.length ||
+    markets.length
   if (!hasAny) return null
 
-  return { google, reddit, xPosts, grokPosts, grokAI, jobs }
+  return { google, reddit, xPosts, grokPosts, grokAI, jobs, markets }
 }
 
 // -----------------------------------------------------------------
@@ -285,6 +346,19 @@ export type EchoInsight = {
   grokAI: AIInsight | null
   newsSummary: string
   marketSummary: string
+  marketItems: Array<{
+    id: string
+    title: string
+    probability: number | null
+    bestBid: number | null
+    bestAsk: number | null
+    change24h: number | null
+    volume24h: number | null
+    closesAt: string
+    url: string
+    group: string
+    icon: string | null
+  }>
   jobSummary: string
   jobItems: Array<{
     id: string
@@ -317,7 +391,7 @@ export async function buildEchoInsight(
   const payload = await fetcher(clean)
   if (!payload) return null
 
-  const { google, reddit, xPosts, grokPosts, grokAI, jobs } = payload
+  const { google, reddit, xPosts, grokPosts, grokAI, jobs, markets } = payload
   const news = google?.organic ?? []
 
   const redditSummary = fallbackLine("Reddit", reddit.length ? `${reddit.length} new Reddit posts.` : "")
@@ -326,7 +400,42 @@ export async function buildEchoInsight(
     ? `[GROK] ${grokAI.summary.trim()}`
     : fallbackLine("Grok", grokPosts.length ? `${grokPosts.length} synthesized threads.` : "")
   const newsSummary = fallbackLine("Google", news.length ? `${news.length} results.` : "")
-  const marketSummary = `[MARKET] Token volume +${Math.floor(Math.random() * 400 + 50)}%`
+  const marketItems = markets
+    .filter((m) => m?.question)
+    .map((m, idx) => {
+      const probability =
+        typeof m?.probability === "number"
+          ? m.probability
+          : typeof m?.bestBid === "number"
+            ? Math.round(m.bestBid * 1000) / 10
+            : typeof m?.lastTradePrice === "number"
+              ? Math.round(m.lastTradePrice * 1000) / 10
+              : null
+
+      return {
+        id: m?.id || `${clean}-market-${idx}`,
+        title: m?.question?.trim() || "Unknown Polymarket",
+        probability,
+        bestBid: typeof m?.bestBid === "number" ? m.bestBid : null,
+        bestAsk: typeof m?.bestAsk === "number" ? m.bestAsk : null,
+        change24h: typeof m?.change24h === "number" ? m.change24h : null,
+        volume24h:
+          typeof m?.volume24h === "number"
+            ? Math.round(m.volume24h)
+            : typeof m?.volume7d === "number"
+              ? Math.round(m.volume7d)
+              : 0,
+        closesAt: m?.endDate ?? "",
+        url: m?.url || (m?.slug ? `https://polymarket.com/market/${m.slug}` : "#"),
+        group: m?.group || "",
+        icon: m?.icon ?? null,
+      }
+    })
+
+  const marketSummary = fallbackLine(
+    "Polymarket",
+    marketItems.length ? `${marketItems.length} live prediction contracts.` : ""
+  )
   const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
 
   const newsItems = news
@@ -390,6 +499,7 @@ export async function buildEchoInsight(
     grokAI,
     newsSummary,
     marketSummary,
+    marketItems,
     jobSummary,
     jobItems,
     newsItems,
