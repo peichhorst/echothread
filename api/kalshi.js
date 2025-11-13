@@ -1,10 +1,10 @@
 export const config = { runtime: "nodejs" }
 
 const DEFAULT_ENDPOINTS = [
-  "https://api.elections.kalshi.com/trade/api/v2/markets",
-  "https://trading-api.kalshi.com/trade/v2/markets",
-  "https://trading.kalshi.com/trade/api/v2/markets",
-  "https://api.kalshi.com/trade/api/v2/markets",
+  "https://api.elections.kalshi.com/trade-api/v2/markets",
+  "https://trading-api.kalshi.com/trade-api/v2/markets",
+  "https://trading.kalshi.com/trade-api/v2/markets",
+  "https://api.kalshi.com/trade-api/v2/markets",
 ]
 const CACHE_TTL_MS = 60 * 1000
 const cache = new Map()
