@@ -6,6 +6,10 @@ const JOBS_PROXY_URL =
   import.meta.env.VITE_JOBS_PROXY_URL?.trim() || "/api/jobs"
 const POLYMARKET_PROXY_URL =
   import.meta.env.VITE_POLYMARKET_PROXY_URL?.trim() || "/api/polymarket"
+const YOUTUBE_PROXY_URL =
+  import.meta.env.VITE_YOUTUBE_PROXY_URL?.trim() || "/api/youtube"
+const KALSHI_PROXY_URL =
+  import.meta.env.VITE_KALSHI_PROXY_URL?.trim() || "/api/kalshi"
 
 // -----------------------------------------------------------------
 // Types
@@ -79,6 +83,24 @@ type MarketContract = {
   group?: string | null
 }
 
+type YoutubeVideo = {
+  id?: string
+  title?: string
+  description?: string
+  channelTitle?: string
+  publishedAt?: string
+  thumbnail?: string | null
+  url?: string
+}
+
+type KalshiMarket = {
+  title: string
+  yesPrice: number
+  noPrice: number
+  volume: number
+  url: string
+}
+
 export type EchoPayload = {
   google: GoogleResponse | null
   reddit: RedditPost[]
@@ -87,6 +109,8 @@ export type EchoPayload = {
   grokAI: AIInsight | null
   jobs: JobResult[]
   markets: MarketContract[]
+  youtube: YoutubeVideo[]
+  kalshi: KalshiMarket[]
 }
 
 // -----------------------------------------------------------------
@@ -227,6 +251,69 @@ const fetchMarkets = async (cleanQuery: string): Promise<MarketContract[]> => {
   }
 }
 
+const fetchYoutube = async (cleanQuery: string): Promise<YoutubeVideo[]> => {
+  if (!cleanQuery) return []
+  const endpoint = YOUTUBE_PROXY_URL.startsWith("http")
+    ? YOUTUBE_PROXY_URL
+    : `${YOUTUBE_PROXY_URL}`
+
+  const params = new URLSearchParams({ q: cleanQuery })
+  const resp = await fetch(`${endpoint}?${params}`, {
+    headers: { Accept: "application/json" },
+  })
+  const raw = await resp.text()
+
+  if (!resp.ok) {
+    let details = ""
+    try {
+      const parsed = JSON.parse(raw)
+      details = parsed?.error ? `: ${parsed.error}` : ""
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(`YouTube proxy ${resp.status}${details}`)
+  }
+
+  try {
+    const payload = JSON.parse(raw) as { data?: YoutubeVideo[] }
+    const list = payload?.data
+    return Array.isArray(list) ? list : []
+  } catch {
+    throw new Error("YouTube proxy non-JSON")
+  }
+}
+
+const fetchKalshi = async (cleanQuery: string): Promise<KalshiMarket[]> => {
+  if (!cleanQuery) return []
+  const endpoint = KALSHI_PROXY_URL.startsWith("http")
+    ? KALSHI_PROXY_URL
+    : `${KALSHI_PROXY_URL}`
+  const params = new URLSearchParams({ q: cleanQuery, limit: "5" })
+
+  try {
+    const resp = await fetch(`${endpoint}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    })
+    const raw = await resp.text()
+
+    if (!resp.ok) {
+      let details = ""
+      try {
+        const parsed = JSON.parse(raw)
+        details = parsed?.error ? `: ${parsed.error}` : ""
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(`Kalshi proxy ${resp.status}${details}`)
+    }
+
+    const payload = JSON.parse(raw) as { data?: KalshiMarket[] }
+    return Array.isArray(payload?.data) ? payload.data : []
+  } catch {
+    return []
+  }
+}
+
 
 const fetchGrok = async (cleanQuery: string): Promise<{ posts: XPost[]; ai: AIInsight | null }> => {
   if (!cleanQuery) return { posts: buildXPlaceholder("your latest note"), ai: null }
@@ -278,12 +365,14 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     return null
   }
 
-  const [gResult, rResult, grokResult, jResult, mResult] = await Promise.allSettled([
+  const [gResult, rResult, grokResult, jResult, mResult, yResult, kResult] = await Promise.allSettled([
     fetchGoogle(cleanQuery),
     fetchReddit(cleanQuery),
     fetchGrok(cleanQuery),
     fetchJobs(cleanQuery),
     fetchMarkets(cleanQuery),
+    fetchYoutube(cleanQuery),
+    fetchKalshi(cleanQuery),
   ])
 
   if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
@@ -291,6 +380,8 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   if (grokResult.status === "rejected") console.warn("Grok:", grokResult.reason)
   if (jResult.status === "rejected") console.warn("Jobs:", jResult.reason)
   if (mResult.status === "rejected") console.warn("Markets:", mResult.reason)
+  if (yResult.status === "rejected") console.warn("YouTube:", yResult.reason)
+  if (kResult.status === "rejected") console.warn("Kalshi:", kResult.reason)
 
   const google = gResult.status === "fulfilled" ? gResult.value : null
   const reddit = rResult.status === "fulfilled" ? rResult.value ?? [] : []
@@ -301,6 +392,8 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
   const xPosts = grokPosts
   const jobs = jResult.status === "fulfilled" ? jResult.value : []
   const markets = mResult.status === "fulfilled" ? mResult.value ?? [] : []
+  const youtube = yResult.status === "fulfilled" ? yResult.value ?? [] : []
+  const kalshi = kResult.status === "fulfilled" ? kResult.value ?? [] : []
 
   const hasAny =
     (google?.organic?.length ?? 0) ||
@@ -308,10 +401,12 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     xPosts.length ||
     grokPosts.length ||
     jobs.length ||
-    markets.length
+    markets.length ||
+    youtube.length ||
+    kalshi.length
   if (!hasAny) return null
 
-  return { google, reddit, xPosts, grokPosts, grokAI, jobs, markets }
+  return { google, reddit, xPosts, grokPosts, grokAI, jobs, markets, youtube, kalshi }
 }
 
 // -----------------------------------------------------------------
@@ -360,6 +455,26 @@ export type EchoInsight = {
     url: string
     group: string
     icon: string | null
+    advice: string
+  }>
+  youtubeSummary: string
+  youtubeItems: Array<{
+    id: string
+    title: string
+    channel: string
+    url: string
+    publishedAt: string
+    description: string
+    thumbnail: string | null
+  }>
+  kalshiSummary: string
+  kalshiItems: Array<{
+    id: string
+    title: string
+    yesPrice: number
+    noPrice: number
+    volume: number
+    url: string
   }>
   jobSummary: string
   jobItems: Array<{
@@ -393,7 +508,7 @@ export async function buildEchoInsight(
   const payload = await fetcher(clean)
   if (!payload) return null
 
-  const { google, reddit, xPosts, grokPosts, grokAI, jobs, markets } = payload
+  const { google, reddit, xPosts, grokPosts, grokAI, jobs, markets, youtube, kalshi } = payload
   const news = google?.organic ?? []
 
   const redditSummary = fallbackLine("Reddit", reddit.length ? `${reddit.length} new Reddit posts.` : "")
@@ -413,6 +528,29 @@ export async function buildEchoInsight(
             : typeof m?.lastTradePrice === "number"
               ? Math.round(m.lastTradePrice * 1000) / 10
               : null
+      const changePercent =
+        typeof m?.change24h === "number" ? Math.round(m.change24h * 10000) / 100 : null
+      const prettyOdds =
+        probability !== null
+          ? `${Number.isInteger(probability) ? probability.toFixed(0) : probability.toFixed(1)}%`
+          : null
+      const advice = (() => {
+        if (probability === null) {
+          if ((m?.volume24h ?? 0) <= 0) return "Liquidity is thin; wait for tighter spreads."
+          return "Quotes are active, but odds are unclear—watch order flow before committing."
+        }
+        if (probability >= 65) {
+          return `YES dominates at ~${prettyOdds}; fade it only if you spot a strong reversal catalyst.`
+        }
+        if (probability <= 35) {
+          return `Market leans NO (~${prettyOdds} YES). Upside exists if you expect bullish news soon.`
+        }
+        if (changePercent !== null && Math.abs(changePercent) >= 1) {
+          const direction = changePercent > 0 ? "YES" : "NO"
+          return `${direction} gained ${Math.abs(changePercent).toFixed(1)} pts today—momentum may keep running if new data lands.`
+        }
+        return "Odds are balanced; stay patient until a catalyst breaks the tie."
+      })()
 
       return {
         id: m?.id || `${clean}-market-${idx}`,
@@ -431,6 +569,7 @@ export async function buildEchoInsight(
         url: m?.url || (m?.slug ? `https://polymarket.com/market/${m.slug}` : "#"),
         group: m?.group || "",
         icon: m?.icon ?? null,
+        advice,
       }
     })
 
@@ -441,31 +580,80 @@ export async function buildEchoInsight(
   )
     */
 
-  // POLYMARKET CROWD WISDOM — works perfectly with your current marketItems
-const marketSummary = marketItems.length > 0
-  ? (() => {
-      const market = marketItems[0]  // top market
+// POLYMARKET — QUERY-AWARE CROWD WISDOM (copy-paste this entire block)
+const marketSummary = (() => {
+  // Step 1: Find markets that actually match your search query
+  const relevantMarkets = marketItems.filter(m =>
+    m.title.toLowerCase().includes(clean.toLowerCase()) ||
+    clean.toLowerCase().includes(m.title.toLowerCase().split(" ")[0].toLowerCase())
+  )
 
-      // Current Polymarket format: "probability" = YES price in % (0–100)
-      const yesProb = Math.round(market.probability ?? 50)
-      const noProb = 100 - yesProb
-      const winner = yesProb > 50 ? "YES" : "NO"
-      const probability = Math.max(yesProb, noProb)
+  // Step 2: If no exact match, fall back to high-volume markets only
+  const candidates = relevantMarkets.length > 0
+    ? relevantMarkets
+    : marketItems.filter(m => (m.volume24h ?? 0) >= 1_000_000)
 
-      const strength =
-        probability >= 80 ? "VERY STRONG" :
-        probability >= 70 ? "STRONG" :
-        probability >= 60 ? "CLEAR" :
-        probability >= 55 ? "SLIGHT" : "WEAK"
+  // Step 3: Pick the best one (highest volume)
+  const best = candidates.reduce((a, b) => 
+    (b.volume24h ?? 0) > (a.volume24h ?? 0) ? b : a, candidates[0] ?? null
+  )
 
-      const volumeTier =
-        (market.volume24h ?? 0) >= 10_000_000 ? "MASSIVE volume" :
-        (market.volume24h ?? 0) >= 5_000_000  ? "HIGH volume" :
-        (market.volume24h ?? 0) >= 1_000_000  ? "decent volume" : "low volume"
+  if (!best) return `[POLYMARKET] No meaningful market found`
 
-      return `[POLYMARKET] Crowd says ${probability}% → ${winner} (${strength} signal, ${volumeTier})`
-    })()
-  : `[POLYMARKET] No liquid market found`
+  const yesProb = Math.round(best.probability ?? 50)
+  const noProb = 100 - yesProb
+  const winner = yesProb > 50 ? "YES" : "NO"
+  const probability = Math.max(yesProb, noProb)
+
+  const strength =
+    probability >= 80 ? "VERY STRONG" :
+    probability >= 70 ? "STRONG" :
+    probability >= 60 ? "CLEAR" :
+    probability >= 55 ? "SLIGHT" : "WEAK"
+
+  const volumeTier =
+    (best.volume24h ?? 0) >= 10_000_000 ? "MASSIVE volume" :
+    (best.volume24h ?? 0) >= 5_000_000 ? "HIGH volume" :
+    (best.volume24h ?? 0) >= 1_000_000 ? "decent volume" : "low volume"
+
+  const shortTitle = best.title.length > 90 
+    ? best.title.slice(0, 87) + "..." 
+    : best.title
+
+  return `[POLYMARKET] Crowd says ${probability}% → ${winner} on "${shortTitle}" (${strength} signal, ${volumeTier})`
+})()
+
+const youtubeItems = youtube.map((video: YoutubeVideo, idx) => ({
+  id: video.id || `${clean}-yt-${idx}`,
+  title: video.title?.trim() || "Untitled video",
+  channel: video.channelTitle || "Unknown channel",
+  url: video.url || (video.id ? `https://www.youtube.com/watch?v=${video.id}` : "#"),
+  publishedAt: video.publishedAt || "",
+  description: stripLinks(video.description || ""),
+  thumbnail: video.thumbnail ?? null,
+}))
+
+const youtubeSummary = fallbackLine(
+  "YouTube",
+  youtubeItems.length ? `${youtubeItems.length} new videos.` : ""
+)
+
+const kalshiItems = kalshi.map((market: KalshiMarket, idx) => ({
+  id: `${market.title}-${idx}`,
+  title: market.title,
+  yesPrice: market.yesPrice,
+  noPrice: market.noPrice,
+  volume: market.volume,
+  url: market.url,
+}))
+
+const highestYes = kalshiItems.reduce<number>(
+  (acc, item) => (item.yesPrice > acc ? item.yesPrice : acc),
+  0
+)
+const kalshiSummary = kalshiItems.length
+  ? `[KALSHI] ${kalshiItems.length} matching markets (YES tops ${highestYes}%).`
+  : "[KALSHI] No direct matches."
 
   const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
 
@@ -531,6 +719,10 @@ const marketSummary = marketItems.length > 0
     newsSummary,
     marketSummary,
     marketItems,
+    youtubeSummary,
+    youtubeItems,
+    kalshiSummary,
+    kalshiItems,
     jobSummary,
     jobItems,
     newsItems,

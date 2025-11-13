@@ -124,7 +124,22 @@ export default async function handler(req, res) {
     }
 
     const markets = Array.isArray(payload) ? payload : payload?.data ?? []
-    const normalized = markets
+    const nowTs = Date.now()
+    const activeMarkets = markets.filter((market) => {
+      const rawEnd =
+        market?.endDate ||
+        market?.end_date_iso ||
+        market?.end_date ||
+        market?.enddate ||
+        null
+      if (!rawEnd) return true
+      const timestamp = Date.parse(rawEnd)
+      if (Number.isNaN(timestamp)) return true
+      return timestamp >= nowTs - 5 * 60 * 1000
+    })
+    const baseline = activeMarkets.length ? activeMarkets : markets
+
+    const normalized = baseline
       .filter((m) => m && m.question)
       .map((m) => normalizeMarket(m))
 

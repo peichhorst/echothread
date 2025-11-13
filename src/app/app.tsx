@@ -11,14 +11,16 @@ import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
 const INITIAL_BATCH = 5
 const SNIPPET_LIMIT = 500
 
-type SectionKey = "reddit" | "x" | "grok" | "news" | "jobs" | "market"
+type SectionKey = "reddit" | "x" | "grok" | "news" | "youtube" | "kalshi" | "jobs" | "market"
 const SECTION_LABELS: Record<SectionKey, string> = {
   reddit: "Reddit",
   x: "X",
   grok: "Grok",
   news: "Google",
+  youtube: "YouTube",
+  kalshi: "Kalshi",
   jobs: "Jobs",
-  market: "Market pulse",
+  market: "Polymarket",
 }
 
 const truncate = (text: string) =>
@@ -86,12 +88,16 @@ export default function App() {
   const [visibleXCounts, setVisibleXCounts] = useState<Record<string, number>>({})
   const [visibleNewsCounts, setVisibleNewsCounts] = useState<Record<string, number>>({})
   const [visibleJobCounts, setVisibleJobCounts] = useState<Record<string, number>>({})
+  const [visibleYoutubeCounts, setVisibleYoutubeCounts] = useState<Record<string, number>>({})
   const [visibleMarketCounts, setVisibleMarketCounts] = useState<Record<string, number>>({})
+  const [visibleKalshiCounts, setVisibleKalshiCounts] = useState<Record<string, number>>({})
   const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>({
     reddit: true,
     x: true,
     grok: true,
     news: true,
+    youtube: true,
+    kalshi: true,
     jobs: true,
     market: true,
   })
@@ -151,6 +157,20 @@ export default function App() {
       return next
     })
     setVisibleJobCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+    setVisibleYoutubeCounts((prev) => {
+      const next: Record<string, number> = {}
+      for (const echo of echoes) {
+        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
+      }
+      return next
+    })
+    setVisibleKalshiCounts((prev) => {
       const next: Record<string, number> = {}
       for (const echo of echoes) {
         next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
@@ -242,11 +262,23 @@ export default function App() {
     }))
 
 
-  const loadMoreNews = (id: string) =>
-    setVisibleNewsCounts((prev) => ({
-      ...prev,
-      [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
-    }))
+const loadMoreNews = (id: string) =>
+  setVisibleNewsCounts((prev) => ({
+    ...prev,
+    [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+  }))
+
+const loadMoreYoutube = (id: string) =>
+  setVisibleYoutubeCounts((prev) => ({
+    ...prev,
+    [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+  }))
+
+const loadMoreKalshi = (id: string) =>
+  setVisibleKalshiCounts((prev) => ({
+    ...prev,
+    [id]: (prev[id] ?? INITIAL_BATCH) + INITIAL_BATCH,
+  }))
 
 const loadMoreJobs = (id: string) =>
   setVisibleJobCounts((prev) => ({
@@ -277,7 +309,7 @@ const loadMoreMarkets = (id: string) =>
                 <h1 className="text-5xl sm:text-6xl font-black tracking-tight">EchoThread</h1>
               </div>
             </div>
-            <div className="w-full lg:max-w-3xl lg:flex-1">
+            <div className="w-full lg:w-1/2">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <Input
                   value={customQuery}
@@ -315,7 +347,7 @@ const loadMoreMarkets = (id: string) =>
           </div>
           <div className="p-6 sm:p-8 space-y-6 flex-1 flex flex-col">
             <div className="grid gap-4">
-              {(["reddit", "x", "grok", "news", "jobs", "market"] as SectionKey[]).map((section) => (
+              {(["reddit", "x", "grok", "news", "youtube", "kalshi", "jobs", "market"] as SectionKey[]).map((section) => (
                 <label
                   key={section}
                   className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80"
@@ -620,6 +652,121 @@ const loadMoreMarkets = (id: string) =>
                     </section>
                   )}
 
+                  {sectionVisibility.youtube && (
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        YouTube
+                      </h4>
+                      <p>{echo.youtubeSummary}</p>
+                      {echo.youtubeItems.length > 0 && (
+                        <div className="space-y-2">
+                          {echo.youtubeItems
+                            .slice(0, visibleYoutubeCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((video) => {
+                              const publishedAtDisplay = formatDateTime(video.publishedAt)
+                              return (
+                                <article
+                                  key={video.id}
+                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 flex gap-3"
+                                >
+                                  {video.thumbnail && (
+                                    <a
+                                      href={video.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex-shrink-0 w-28 h-20 overflow-hidden rounded-lg border border-purple-400/20"
+                                    >
+                                      <img
+                                        src={video.thumbnail}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </a>
+                                  )}
+                                  <div className="space-y-1">
+                                    <a
+                                      href={video.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-semibold text-purple-50 hover:text-white transition"
+                                    >
+                                      {video.title}
+                                    </a>
+                                    <p className="text-[11px] uppercase tracking-wide text-purple-200/60">
+                                      {video.channel}
+                                      {publishedAtDisplay && ` • ${publishedAtDisplay}`}
+                                    </p>
+                                    <p className="text-xs text-purple-200/80">
+                                      {truncate(video.description)}
+                                    </p>
+                                  </div>
+                                </article>
+                              )
+                            })}
+                          {echo.youtubeItems.length >
+                            (visibleYoutubeCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreYoutube(echo.id)}
+                            >
+                              Watch more videos
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {sectionVisibility.kalshi && (
+                    <section className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                        Kalshi
+                      </h4>
+                      <p>{echo.kalshiSummary}</p>
+                      {echo.kalshiItems.length > 0 && (
+                        <div className="space-y-2">
+                          {echo.kalshiItems
+                            .slice(0, visibleKalshiCounts[echo.id] ?? INITIAL_BATCH)
+                            .map((market, idx) => (
+                              <article
+                                key={`${market.id}-${idx}`}
+                                className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
+                              >
+                                <a
+                                  href={market.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-purple-50 hover:text-white transition"
+                                >
+                                  {market.title}
+                                </a>
+                                <p className="text-xs text-purple-200/80 flex flex-wrap gap-3">
+                                  <span>YES {market.yesPrice}%</span>
+                                  <span>NO {market.noPrice}%</span>
+                                  <span>Vol {formatVolumeValue(market.volume)}</span>
+                                </p>
+                              </article>
+                            ))}
+                          {echo.kalshiItems.length >
+                            (visibleKalshiCounts[echo.id] ?? INITIAL_BATCH) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-purple-200"
+                              onClick={() => loadMoreKalshi(echo.id)}
+                            >
+                              See more Kalshi markets
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
                   {sectionVisibility.jobs && (
                     <section className="space-y-2">
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
@@ -742,6 +889,9 @@ const loadMoreMarkets = (id: string) =>
                                     <span>Ask {askDisplay}</span>
                                     {closesAtDisplay && <span>Closes {closesAtDisplay}</span>}
                                   </div>
+                                  {item.advice && (
+                                    <p className="text-xs text-purple-100/80 italic">{item.advice}</p>
+                                  )}
                                 </article>
                               )
                             })}
