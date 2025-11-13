@@ -277,14 +277,14 @@ const loadMoreMarkets = (id: string) =>
                 <h1 className="text-5xl sm:text-6xl font-black tracking-tight">EchoThread</h1>
               </div>
             </div>
-            <div className="w-full lg:w-auto">
+            <div className="w-full lg:max-w-3xl lg:flex-1">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <Input
                   value={customQuery}
                   onChange={(event) => setCustomQuery(event.target.value)}
                   placeholder="Global echo... type anything"
                   disabled={isFetching}
-                  className="bg-transparent border-white/20 flex-1"
+                  className="bg-transparent border-white/20 flex-1 min-w-0 text-base sm:text-lg py-3"
                 />
                 <Button
                   type="button"

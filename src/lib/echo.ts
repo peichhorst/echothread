@@ -434,10 +434,39 @@ export async function buildEchoInsight(
       }
     })
 
+    /*
   const marketSummary = fallbackLine(
     "Polymarket",
     marketItems.length ? `${marketItems.length} live prediction contracts.` : ""
   )
+    */
+
+  // POLYMARKET CROWD WISDOM — works perfectly with your current marketItems
+const marketSummary = marketItems.length > 0
+  ? (() => {
+      const market = marketItems[0]  // top market
+
+      // Current Polymarket format: "probability" = YES price in % (0–100)
+      const yesProb = Math.round(market.probability ?? 50)
+      const noProb = 100 - yesProb
+      const winner = yesProb > 50 ? "YES" : "NO"
+      const probability = Math.max(yesProb, noProb)
+
+      const strength =
+        probability >= 80 ? "VERY STRONG" :
+        probability >= 70 ? "STRONG" :
+        probability >= 60 ? "CLEAR" :
+        probability >= 55 ? "SLIGHT" : "WEAK"
+
+      const volumeTier =
+        (market.volume24h ?? 0) >= 10_000_000 ? "MASSIVE volume" :
+        (market.volume24h ?? 0) >= 5_000_000  ? "HIGH volume" :
+        (market.volume24h ?? 0) >= 1_000_000  ? "decent volume" : "low volume"
+
+      return `[POLYMARKET] Crowd says ${probability}% → ${winner} (${strength} signal, ${volumeTier})`
+    })()
+  : `[POLYMARKET] No liquid market found`
+
   const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
 
   const newsItems = news
