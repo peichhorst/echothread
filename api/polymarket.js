@@ -77,8 +77,10 @@ export default async function handler(req, res) {
   const limitParam = Number(getQueryParam(req.query?.limit)) || 12
   const limit = Math.max(1, Math.min(limitParam, 40))
   const tagId = getQueryParam(req.query?.tag)
+  const queryParam = getQueryParam(req.query?.q ?? req.query?.query)
+  const query = typeof queryParam === "string" ? queryParam.trim() : ""
 
-  const cacheKey = JSON.stringify({ limit, tagId })
+  const cacheKey = JSON.stringify({ limit, tagId, query })
   const now = Date.now()
   const cached = cache.get(cacheKey)
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
@@ -90,7 +92,8 @@ export default async function handler(req, res) {
   url.searchParams.set("closed", "false")
   url.searchParams.set("order", "id")
   url.searchParams.set("ascending", "false")
-  url.searchParams.set("limit", String(limit))
+  const upstreamLimit = query ? Math.min(limit * 3, 60) : limit
+  url.searchParams.set("limit", String(upstreamLimit))
   if (tagId) {
     url.searchParams.set("tag_id", tagId)
   }
@@ -124,9 +127,27 @@ export default async function handler(req, res) {
     const normalized = markets
       .filter((m) => m && m.question)
       .map((m) => normalizeMarket(m))
-      .filter((m) => !m.restricted)
 
-    const responsePayload = { data: normalized }
+    let filtered = normalized
+    if (query) {
+      const needle = query.toLowerCase()
+      filtered = normalized.filter((m) => {
+        const haystacks = [
+          m.question,
+          m.slug,
+          m.group,
+          ...(m.outcomes ?? []),
+        ]
+        return haystacks.some((value) =>
+          typeof value === "string" ? value.toLowerCase().includes(needle) : false
+        )
+      })
+      if (filtered.length === 0) {
+        filtered = normalized
+      }
+    }
+
+    const responsePayload = { data: filtered.slice(0, limit) }
     cache.set(cacheKey, { timestamp: now, payload: responsePayload })
     return sendCached(res, { payload: responsePayload }, cached ? "REFRESH" : "MISS")
   } catch (error) {

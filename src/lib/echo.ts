@@ -194,12 +194,14 @@ const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
   return Array.isArray(data) ? data : []
 }
 
-const fetchMarkets = async (): Promise<MarketContract[]> => {
+const fetchMarkets = async (cleanQuery: string): Promise<MarketContract[]> => {
   const endpoint = POLYMARKET_PROXY_URL.startsWith("http")
     ? POLYMARKET_PROXY_URL
     : `${POLYMARKET_PROXY_URL}`
+  const params = new URLSearchParams({ limit: "12" })
+  if (cleanQuery) params.set("q", cleanQuery)
 
-  const resp = await fetch(`${endpoint}?limit=12`, {
+  const resp = await fetch(`${endpoint}?${params}`, {
     headers: { Accept: "application/json" },
   })
   const raw = await resp.text()
@@ -281,7 +283,7 @@ export async function fetchEcho(query: string): Promise<EchoPayload | null> {
     fetchReddit(cleanQuery),
     fetchGrok(cleanQuery),
     fetchJobs(cleanQuery),
-    fetchMarkets(),
+    fetchMarkets(cleanQuery),
   ])
 
   if (gResult.status === "rejected") console.warn("Google:", gResult.reason)
