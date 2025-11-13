@@ -1,10 +1,13 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node"
+/**
+ * @typedef {import("@vercel/node").VercelRequest} VercelRequest
+ * @typedef {import("@vercel/node").VercelResponse} VercelResponse
+ */
 
 const TOKEN_ENDPOINT = "https://www.reddit.com/api/v1/access_token"
 const SEARCH_ENDPOINT = "https://oauth.reddit.com/search"
 const USER_AGENT = "echothread-proxy/1.0 (by /u/echothread-app)"
 
-function setCorsHeaders(res: VercelResponse) {
+function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*")
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS")
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -36,7 +39,7 @@ async function getAccessToken() {
     throw new Error(`Reddit token request failed (${response.status}): ${body}`)
   }
 
-  const payload = (await response.json()) as { access_token?: string }
+  const payload = await response.json()
   if (!payload.access_token) {
     throw new Error("No access token returned from Reddit.")
   }
@@ -44,7 +47,7 @@ async function getAccessToken() {
   return payload.access_token
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req, res) {
   setCorsHeaders(res)
 
   if (req.method === "OPTIONS") {
@@ -56,7 +59,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method Not Allowed" })
   }
 
-  const query = (req.query.q || req.query.query) as string | undefined
+  const queryParam = req.query?.q ?? req.query?.query
+  const query = Array.isArray(queryParam) ? queryParam[0] : queryParam
   if (!query) {
     return res.status(400).json({ error: "Missing query parameter (?q=...)" })
   }
