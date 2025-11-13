@@ -2,9 +2,8 @@
 const SERPER_API = "https://google.serper.dev/search"
 const REDDIT_PROXY_URL =
   import.meta.env.VITE_REDDIT_PROXY_URL ?? "/api/reddit-search"
-const JSEARCH_API_HOST =
-  import.meta.env.VITE_RAPIDAPI_HOST?.trim() || "jsearch.p.rapidapi.com"
-const JSEARCH_API = `https://${JSEARCH_API_HOST}/search`
+const JOBS_PROXY_URL =
+  import.meta.env.VITE_JOBS_PROXY_URL?.trim() || "/api/jobs"
 
 // -----------------------------------------------------------------
 // Types
@@ -143,20 +142,33 @@ const fetchReddit = async (cleanQuery: string): Promise<RedditPost[]> => {
 }
 
 const fetchJobs = async (cleanQuery: string): Promise<JobResult[]> => {
-  const rapidKey = import.meta.env.VITE_RAPIDAPI_KEY
-  if (!rapidKey) return []
-  const resp = await fetch(
-    `${JSEARCH_API}?query=${encodeURIComponent(cleanQuery)}&page=1&num_pages=1&country=us&date_posted=all`,
-    {
-      headers: {
-        "x-rapidapi-key": rapidKey,
-        "x-rapidapi-host": JSEARCH_API_HOST,
-        Accept: "application/json",
-      },
+  const endpoint = JOBS_PROXY_URL.startsWith("http")
+    ? JOBS_PROXY_URL
+    : `${JOBS_PROXY_URL}` // relative path (default)
+
+  const resp = await fetch(`${endpoint}?q=${encodeURIComponent(cleanQuery)}`, {
+    headers: { Accept: "application/json" },
+  })
+  const raw = await resp.text()
+
+  if (!resp.ok) {
+    let details = ""
+    try {
+      const parsed = JSON.parse(raw)
+      details = parsed?.error ? `: ${parsed.error}` : ""
+    } catch {
+      // ignore JSON parse error, fall back to status
     }
-  )
-  if (!resp.ok) throw new Error(`JSearch ${resp.status}`)
-  const { data } = (await resp.json()) as { data?: JobResult[] }
+    throw new Error(`Jobs proxy ${resp.status}${details}`)
+  }
+
+  let payload: { data?: JobResult[] } = {}
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    throw new Error("Jobs proxy non-JSON")
+  }
+  const { data } = payload
   return Array.isArray(data) ? data : []
 }
 
