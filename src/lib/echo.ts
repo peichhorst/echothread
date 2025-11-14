@@ -653,7 +653,7 @@ const formatNumber = (n: number) => {
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
   return n.toString()
 }
-// — KALSHI (REAL REGULATED MARKETS) —
+// - KALSHI (REAL REGULATED MARKETS) -
 const sortKalshi = (list: KalshiMarket[], prioritizeScore: boolean) =>
   [...list].sort((a, b) => {
     if (prioritizeScore) {
@@ -663,10 +663,23 @@ const sortKalshi = (list: KalshiMarket[], prioritizeScore: boolean) =>
     return (b.volume ?? 0) - (a.volume ?? 0)
   })
 
+const KALSHI_SECTION_LIMIT = 5
 const kalshiByScore = sortKalshi(kalshi.filter(m => (m.score ?? 0) > 0), true)
-const kalshiFallback = sortKalshi(kalshi, false)
-
-const kalshiCandidates = (kalshiByScore.length ? kalshiByScore : kalshiFallback).slice(0, 5)
+const kalshiFallbackPool = sortKalshi(kalshi, false)
+const seenKalshiIds = new Set(
+  kalshiByScore
+    .map(market => (market.url && market.url.trim()) || market.title)
+    .filter((value): value is string => Boolean(value))
+)
+const kalshiFill: KalshiMarket[] = []
+for (const market of kalshiFallbackPool) {
+  const dedupeKey = (market.url && market.url.trim()) || market.title
+  if (!dedupeKey || seenKalshiIds.has(dedupeKey)) continue
+  kalshiFill.push(market)
+  seenKalshiIds.add(dedupeKey)
+  if (kalshiByScore.length + kalshiFill.length >= KALSHI_SECTION_LIMIT) break
+}
+const kalshiCandidates = [...kalshiByScore, ...kalshiFill].slice(0, KALSHI_SECTION_LIMIT)
 
 const kalshiItems = kalshiCandidates.map((market, idx) => ({
   id: `kalshi-${idx}`,
@@ -679,7 +692,7 @@ const kalshiItems = kalshiCandidates.map((market, idx) => ({
   category: market.category ?? "",
   eventTitle: market.eventTitle ?? market.title,
   eventUrl: market.eventUrl ?? market.url,
-  matchType: market.matchType ?? (kalshiByScore.length ? "direct" : "fallback"),
+  matchType: market.matchType ?? ((market.score ?? 0) > 0 ? "direct" : "fallback"),
 }))
 
 const topKalshi = kalshiItems[0]
