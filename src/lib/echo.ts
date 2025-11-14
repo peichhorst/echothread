@@ -99,6 +99,11 @@ type KalshiMarket = {
   noPrice: number
   volume: number
   url: string
+  score?: number
+  category?: string
+  eventTitle?: string
+  eventUrl?: string
+  matchType?: "direct" | "fallback"
 }
 
 export type EchoPayload = {
@@ -475,6 +480,11 @@ export type EchoInsight = {
     noPrice: number
     volume: number
     url: string
+    score: number
+    category: string
+    eventTitle: string
+    eventUrl: string
+    matchType: "direct" | "fallback"
   }>
   jobSummary: string
   jobItems: Array<{
@@ -644,28 +654,46 @@ const formatNumber = (n: number) => {
   return n.toString()
 }
 // — KALSHI (REAL REGULATED MARKETS) —
-const kalshiItems = kalshi
-  .filter(m => m.title.toLowerCase().includes(clean.toLowerCase()))
-  .slice(0, 3)
-  .map((market, idx) => ({
-    id: `kalshi-${idx}`,
-    title: market.title,
-    yesPrice: market.yesPrice || 0,
-    noPrice: market.noPrice || 0,
-    volume: market.volume || 0,
-    url: market.url,
-    // score is no longer needed — we use volume + relevance
-  }))
-  .sort((a, b) => b.volume - a.volume)
+const sortKalshi = (list: KalshiMarket[], prioritizeScore: boolean) =>
+  [...list].sort((a, b) => {
+    if (prioritizeScore) {
+      const diff = (b.score ?? 0) - (a.score ?? 0)
+      if (diff !== 0) return diff
+    }
+    return (b.volume ?? 0) - (a.volume ?? 0)
+  })
+
+const kalshiByScore = sortKalshi(kalshi.filter(m => (m.score ?? 0) > 0), true)
+const kalshiFallback = sortKalshi(kalshi, false)
+
+const kalshiCandidates = (kalshiByScore.length ? kalshiByScore : kalshiFallback).slice(0, 5)
+
+const kalshiItems = kalshiCandidates.map((market, idx) => ({
+  id: `kalshi-${idx}`,
+  title: market.title,
+  yesPrice: market.yesPrice || 0,
+  noPrice: market.noPrice || 0,
+  volume: market.volume || 0,
+  url: market.url,
+  score: market.score ?? 0,
+  category: market.category ?? "",
+  eventTitle: market.eventTitle ?? market.title,
+  eventUrl: market.eventUrl ?? market.url,
+  matchType: market.matchType ?? (kalshiByScore.length ? "direct" : "fallback"),
+}))
 
 const topKalshi = kalshiItems[0]
 const totalKalshiVolume = kalshiItems.reduce((sum, m) => sum + m.volume, 0)
 
-const kalshiSummary = kalshiItems.length > 0
-  ? topKalshi
-    ? `[KALSHI] "${topKalshi.title}" — ${topKalshi.yesPrice}% YES ($${formatNumber(topKalshi.volume)} vol)`
-    : `[KALSHI] ${kalshiItems.length} regulated markets — $${formatNumber(totalKalshiVolume)} total volume`
-  : "[KALSHI] No active regulated markets"
+const kalshiSummary = (() => {
+  if (!kalshiItems.length) return "[KALSHI] No active regulated markets"
+  const hasDirect = kalshiItems.some(item => item.matchType === "direct")
+  const top = kalshiItems[0]
+  if (hasDirect) {
+    return `[KALSHI] "${top.title}" — ${top.yesPrice}% YES ($${formatNumber(top.volume)} vol)`
+  }
+  return `[KALSHI] No direct matches; showing $${formatNumber(totalKalshiVolume)} high-volume markets`
+})()
 
 
 

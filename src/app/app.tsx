@@ -1,11 +1,7 @@
-import { useEditor, EditorContent } from "@tiptap/react"
-import StarterKit from "@tiptap/starter-kit"
-import Placeholder from "@tiptap/extension-placeholder"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Waves, Sparkles, Loader2, X as CloseIcon } from "lucide-react"
-import { motion } from "framer-motion"
-import { useEffect, useRef, useState } from "react"
+import { Waves, Sparkles, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
 
 const INITIAL_BATCH = 5
@@ -23,6 +19,35 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   market: "Polymarket",
 }
 const SECTION_STORAGE_KEY = "echothread-section-visibility"
+
+const createDefaultSections = (): Record<SectionKey, boolean> => ({
+  reddit: true,
+  x: true,
+  grok: true,
+  news: true,
+  youtube: true,
+  kalshi: true,
+  jobs: true,
+  market: true,
+})
+
+const readStoredSections = (): Record<SectionKey, boolean> => {
+  const base = createDefaultSections()
+  if (typeof window === "undefined") return base
+  try {
+    const raw = window.localStorage.getItem(SECTION_STORAGE_KEY)
+    if (!raw) return base
+    const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "boolean" && (SECTION_LABELS as Record<string, string>)[key]) {
+        base[key as SectionKey] = value
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to parse section preferences", error)
+  }
+  return base
+}
 
 const truncate = (text: string) =>
   text.length > SNIPPET_LIMIT ? `${text.slice(0, SNIPPET_LIMIT)}…` : text
@@ -80,7 +105,6 @@ const formatVolumeValue = (value?: number | null) => {
 }
 
 export default function App() {
-  const [echoCount, setEchoCount] = useState(0)
   const [echoes, setEchoes] = useState<EchoInsight[]>([])
   const [isFetching, setIsFetching] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -92,76 +116,12 @@ export default function App() {
   const [visibleYoutubeCounts, setVisibleYoutubeCounts] = useState<Record<string, number>>({})
   const [visibleMarketCounts, setVisibleMarketCounts] = useState<Record<string, number>>({})
   const [visibleKalshiCounts, setVisibleKalshiCounts] = useState<Record<string, number>>({})
-  const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>({
-    reddit: true,
-    x: true,
-    grok: true,
-    news: true,
-    youtube: true,
-    kalshi: true,
-    jobs: true,
-    market: true,
-  })
-  const sectionsHydrated = useRef(false)
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Placeholder.configure({
-        placeholder:
-          "Start typing, highlight a phrase, then smash the big echo button.",
-      }),
-    ],
-    content: "",
-    editorProps: {
-      attributes: {
-        class:
-          "prose prose-invert max-w-none focus:outline-none min-h-[140px] max-h-[220px] overflow-auto text-base lg:text-lg",
-      },
-    },
-  })
-
-  useEffect(() => {
-    setVisibleXCounts((prev) => {
-      const next: Record<string, number> = {}
-      for (const echo of echoes) {
-        next[echo.id] = prev[echo.id] ?? INITIAL_BATCH
-      }
-      return next
-    })
-    if (!editor) return
-    const timeout = setTimeout(() => {
-      editor.commands.focus("end")
-    }, 50)
-    return () => clearTimeout(timeout)
-  }, [editor])
+  const [sectionVisibility, setSectionVisibility] = useState<Record<SectionKey, boolean>>(
+    readStoredSections
+  )
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    try {
-      const raw = window.localStorage.getItem(SECTION_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>
-        const next: Partial<Record<SectionKey, boolean>> = {}
-        for (const [key, value] of Object.entries(parsed)) {
-          if (value === undefined) continue
-          if ((SECTION_LABELS as Record<string, string>)[key] && typeof value === "boolean") {
-            next[key as SectionKey] = value
-          }
-        }
-        if (Object.keys(next).length > 0) {
-          setSectionVisibility((prev) => ({ ...prev, ...next }))
-        }
-      }
-    } catch (error) {
-      console.warn("Failed to hydrate section preferences", error)
-    } finally {
-      sectionsHydrated.current = true
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!sectionsHydrated.current || typeof window === "undefined") return
     try {
       window.localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(sectionVisibility))
     } catch (error) {
@@ -221,21 +181,6 @@ export default function App() {
     })
   }, [echoes])
 
-  const computeContextQuery = () => {
-    if (!editor) return null
-    const { selection } = editor.state
-    if (!selection.empty) {
-      const highlighted = editor.state.doc.textBetween(selection.from, selection.to, " ").trim()
-      if (highlighted) return highlighted
-    }
-
-    const currentParagraph = selection.$from.parent?.textContent?.trim()
-    if (currentParagraph) return currentParagraph
-
-    const docText = editor.state.doc.textBetween(0, editor.state.doc.content.size, " ").trim()
-    return docText || null
-  }
-
   const runEcho = async (query: string) => {
     const trimmed = query.trim()
     if (!trimmed) {
@@ -253,7 +198,6 @@ export default function App() {
       }
 
       setEchoes((prev) => [insight, ...prev])
-      setEchoCount((count) => count + 1)
       return true
     } catch (error) {
       const message =
@@ -265,18 +209,6 @@ export default function App() {
       setIsFetching(false)
     }
   }
-
-  const handleEcho = async () => {
-    if (isFetching) return
-    const query = computeContextQuery()
-    if (!query) {
-      setFeedback("Type something in the editor first, then trigger an echo.")
-      return
-    }
-    await runEcho(query)
-  }
-
-
 
   const loadMoreReddit = (id: string) =>
     setVisibleRedditCounts((prev) => ({
@@ -330,15 +262,17 @@ const loadMoreMarkets = (id: string) =>
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950 text-white overflow-x-hidden flex flex-col">
       <header className="sticky top-0 z-50 bg-gradient-to-br from-purple-950 via-indigo-950 to-blue-950/95 border-b border-white/10 shadow-2xl">
-        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-6">
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-6 space-y-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-3">
               <div className="flex items-center gap-5">
-                <Sparkles className="w-16 h-16 text-yellow-400 animate-pulse" />
-                <h1 className="text-5xl sm:text-6xl font-black tracking-tight">EchoThread</h1>
+                <Sparkles className="w-12 h-12 text-yellow-400 animate-pulse" />
+                <h1 className="text-4xl sm:text-5xl font-black tracking-tight">
+                  Echo<span className="text-yellow-400">&nbsp;</span>Thread
+                </h1>
               </div>
             </div>
-            <div className="w-full lg:w-1/2">
+            <div className="w-full lg:max-w-2xl lg:flex-1">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <Input
                   value={customQuery}
@@ -347,99 +281,55 @@ const loadMoreMarkets = (id: string) =>
                   disabled={isFetching}
                   className="bg-transparent border-white/20 flex-1 min-w-0 text-base sm:text-lg py-3"
                 />
-               <Button
-  type="button"
-  onClick={() => runEcho(customQuery)}
-  disabled={isFetching || !customQuery.trim()}
-  className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-400 text-white font-semibold w-full sm:w-auto flex items-center gap-2"
->
-  <Waves className="w-5 h-5" />
-  Echo
-</Button>
+                <Button
+                  type="button"
+                  onClick={() => runEcho(customQuery)}
+                  disabled={isFetching || !customQuery.trim()}
+                  className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-400 text-white font-semibold w-full sm:w-auto flex items-center gap-2"
+                >
+                  {isFetching ? (
+                    <div className="animate-spin">
+                      <Waves className="w-5 h-5" />
+                    </div>
+                  ) : (
+                    <Waves className="w-5 h-5" />
+                  )}
+                  Echo
+                </Button>
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl p-6">
+            <h2 className="text-2xl font-semibold mb-4">Signal filters</h2>
+            <p className="text-sm text-white/70 mb-4">
+              Choose which data sources appear on every echo card. Use this to focus on the feeds that matter
+              for the current session.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {(["reddit", "x", "grok", "news", "youtube", "kalshi", "jobs", "market"] as SectionKey[]).map(
+                (section) => (
+                  <label
+                    key={section}
+                    className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-white/30 bg-transparent text-purple-500 focus:ring-purple-400"
+                      checked={sectionVisibility[section]}
+                      onChange={() => toggleSection(section)}
+                    />
+                    <span>{SECTION_LABELS[section]}</span>
+                  </label>
+                )
+              )}
             </div>
           </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto px-6 lg:px-10 pt-8 pb-6 flex flex-col">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] items-stretch">
-          <aside className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl h-full flex flex-col">
-
-               
-
-          <div className="px-6 lg:px-8 py-6 border-b border-white/10">
-            <h2 className="text-2xl font-semibold">Signal filters</h2>
-            <p className="text-sm text-white/70 mt-1">
-              Choose which data sources appear on every echo card. Use this to focus on the feeds that matter
-              for the current session.
-            </p>
-          </div>
-          <div className="p-6 sm:p-8 space-y-6 flex-1 flex flex-col">
-            <div className="grid gap-4">
-              {(["reddit", "x", "grok", "news", "youtube", "kalshi", "jobs", "market"] as SectionKey[]).map((section) => (
-                <label
-                  key={section}
-                  className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white/80"
-                >
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-white/30 bg-transparent text-purple-500 focus:ring-purple-400"
-                    checked={sectionVisibility[section]}
-                    onChange={() => toggleSection(section)}
-                  />
-                  <span>{SECTION_LABELS[section]}</span>
-                </label>
-              ))}
-            </div>
-
-          </div>
-        </aside>
-
-        <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-2xl overflow-hidden h-full flex flex-col">
-          <div className="px-6 lg:px-8 py-6 border-b border-white/10 flex flex-col gap-4">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-semibold">Editor canvas</h2>
-                <p className="text-sm text-white/70 mt-1">
-                  Draft your notes, highlight any phrase, then hit the wave button to drop a live echo card into the feed.
-                </p>
-              </div>
-              <motion.div
-                initial={{ scale: 0, rotate: -360 }}
-                animate={{ scale: 1, rotate: 0 }}
-                transition={{ type: "spring", stiffness: 260, damping: 20 }}
-                className="flex justify-end"
-              >
-                <Button
-                  onClick={handleEcho}
-                  disabled={isFetching}
-                  className="rounded-full w-20 h-20 lg:w-24 lg:h-24 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-4xl text-3xl font-black flex items-center justify-center disabled:opacity-70"
-                  aria-label="Trigger echo"
-                >
-                  {isFetching ? (
-                    <Loader2 className="w-8 h-8 lg:w-10 lg:h-10 animate-spin" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-1 leading-tight text-center">
-                      <span className="text-[11px] lg:text-xs font-semibold tracking-wide text-white/80">
-                        {echoCount}
-                      </span>
-                      <Waves className="w-10 h-10 lg:w-14 lg:h-14" />
-                    </div>
-                  )}
-                </Button>
-              </motion.div>
-            </div>
-          </div>
-          <div className="p-6 sm:p-8 flex-1 flex flex-col gap-5">
-            <div className="flex-1 overflow-y-auto max-h-[360px] max-w-[90%]">
-              <EditorContent editor={editor} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <section className="mt-auto flex flex-col gap-6 w-full">
+        <section className="mt-auto flex flex-col gap-6 w-full">
         {feedback && (
           <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/15 text-yellow-100 px-4 py-3 text-sm">
             {feedback}
@@ -467,7 +357,7 @@ const loadMoreMarkets = (id: string) =>
                   className="absolute top-4 right-4 rounded-full border border-purple-300/30 bg-purple-900/60 p-1 text-purple-200 hover:bg-purple-800 hover:text-white transition"
                   aria-label="Remove echo card"
                 >
-                  <CloseIcon className="w-4 h-4" />
+                  <X className="w-4 h-4" />
                 </button>
                 <div className="flex flex-col gap-1">
                   <p className="text-xs text-purple-200/60">
@@ -750,36 +640,58 @@ const loadMoreMarkets = (id: string) =>
                     </section>
                   )}
 
-                  {sectionVisibility.kalshi && (
-                    <section className="space-y-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
-                        Kalshi
-                      </h4>
-                      <p>{echo.kalshiSummary}</p>
-                      {echo.kalshiItems.length > 0 && (
-                        <div className="space-y-2">
-                          {echo.kalshiItems
-                            .slice(0, visibleKalshiCounts[echo.id] ?? INITIAL_BATCH)
-                            .map((market, idx) => (
-                              <article
-                                key={`${market.id}-${idx}`}
-                                className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-1.5"
-                              >
-                                <a
-                                  href={market.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-semibold text-purple-50 hover:text-white transition"
+                    {sectionVisibility.kalshi && (
+                      <section className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200/70">
+                          Kalshi
+                        </h4>
+                        <p>{echo.kalshiSummary}</p>
+                        {echo.kalshiItems.length > 0 && (
+                          <div className="space-y-2">
+                            {echo.kalshiItems
+                              .slice(0, visibleKalshiCounts[echo.id] ?? INITIAL_BATCH)
+                              .map((market, idx) => (
+                                <article
+                                  key={`${market.id}-${idx}`}
+                                  className="border border-purple-300/20 rounded-xl bg-purple-900/30 p-4 space-y-2"
                                 >
-                                  {market.title}
-                                </a>
-                                <p className="text-xs text-purple-200/80 flex flex-wrap gap-3">
-                                  <span>YES {market.yesPrice}%</span>
-                                  <span>NO {market.noPrice}%</span>
-                                  <span>Vol {formatVolumeValue(market.volume)}</span>
-                                </p>
-                              </article>
-                            ))}
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                      <a
+                                        href={market.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-semibold text-purple-50 hover:text-white transition"
+                                      >
+                                        {market.title}
+                                      </a>
+                                      {market.eventTitle && (
+                                        <a
+                                          href={market.eventUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[11px] text-purple-200/70 underline-offset-2 hover:underline"
+                                        >
+                                          {market.eventTitle}
+                                        </a>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] uppercase tracking-wide text-purple-200/60">
+                                      {market.category || "Kalshi"}
+                                    </span>
+                                  </div>
+                                  {market.matchType === "fallback" && (
+                                    <p className="text-[11px] text-amber-300 uppercase tracking-wide">
+                                      Similar high-volume market (no direct match)
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-purple-200/80 flex flex-wrap gap-3">
+                                    <span>YES {market.yesPrice}%</span>
+                                    <span>NO {market.noPrice}%</span>
+                                    <span>Vol {formatVolumeValue(market.volume)}</span>
+                                  </p>
+                                </article>
+                              ))}
                           {echo.kalshiItems.length >
                             (visibleKalshiCounts[echo.id] ?? INITIAL_BATCH) && (
                             <Button
@@ -946,9 +858,8 @@ const loadMoreMarkets = (id: string) =>
             ))}
           </div>
         )}
-      </section>
-
-    </main>
+        </section>
+      </main>
 
     </div>
   )
