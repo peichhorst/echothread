@@ -638,22 +638,37 @@ const youtubeSummary = fallbackLine(
   youtubeItems.length ? `${youtubeItems.length} new videos.` : ""
 )
 
-const kalshiItems = kalshi.map((market: KalshiMarket, idx) => ({
-  id: `${market.title}-${idx}`,
-  title: market.title,
-  yesPrice: market.yesPrice,
-  noPrice: market.noPrice,
-  volume: market.volume,
-  url: market.url,
-}))
+const formatNumber = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
+  return n.toString()
+}
+// — KALSHI (REAL REGULATED MARKETS) —
+const kalshiItems = kalshi
+  .filter(m => m.title.toLowerCase().includes(clean.toLowerCase()))
+  .slice(0, 3)
+  .map((market, idx) => ({
+    id: `kalshi-${idx}`,
+    title: market.title,
+    yesPrice: market.yesPrice || 0,
+    noPrice: market.noPrice || 0,
+    volume: market.volume || 0,
+    url: market.url,
+    // score is no longer needed — we use volume + relevance
+  }))
+  .sort((a, b) => b.volume - a.volume)
 
-const highestYes = kalshiItems.reduce<number>(
-  (acc, item) => (item.yesPrice > acc ? item.yesPrice : acc),
-  0
-)
-const kalshiSummary = kalshiItems.length
-  ? `[KALSHI] ${kalshiItems.length} matching markets (YES tops ${highestYes}%).`
-  : "[KALSHI] No direct matches."
+const topKalshi = kalshiItems[0]
+const totalKalshiVolume = kalshiItems.reduce((sum, m) => sum + m.volume, 0)
+
+const kalshiSummary = kalshiItems.length > 0
+  ? topKalshi
+    ? `[KALSHI] "${topKalshi.title}" — ${topKalshi.yesPrice}% YES ($${formatNumber(topKalshi.volume)} vol)`
+    : `[KALSHI] ${kalshiItems.length} regulated markets — $${formatNumber(totalKalshiVolume)} total volume`
+  : "[KALSHI] No active regulated markets"
+
+
+
 
   const jobSummary = fallbackLine("JOBS", jobs.length ? `${jobs.length} openings.` : "")
 

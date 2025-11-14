@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Waves, Sparkles, Loader2, X as CloseIcon } from "lucide-react"
 import { motion } from "framer-motion"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { buildEchoInsight, type EchoInsight } from "@/lib/echo"
 
 const INITIAL_BATCH = 5
@@ -22,6 +22,7 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   jobs: "Jobs",
   market: "Polymarket",
 }
+const SECTION_STORAGE_KEY = "echothread-section-visibility"
 
 const truncate = (text: string) =>
   text.length > SNIPPET_LIMIT ? `${text.slice(0, SNIPPET_LIMIT)}…` : text
@@ -101,6 +102,7 @@ export default function App() {
     jobs: true,
     market: true,
   })
+  const sectionsHydrated = useRef(false)
 
   const editor = useEditor({
     extensions: [
@@ -133,6 +135,39 @@ export default function App() {
     }, 50)
     return () => clearTimeout(timeout)
   }, [editor])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const raw = window.localStorage.getItem(SECTION_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>
+        const next: Partial<Record<SectionKey, boolean>> = {}
+        for (const [key, value] of Object.entries(parsed)) {
+          if (value === undefined) continue
+          if ((SECTION_LABELS as Record<string, string>)[key] && typeof value === "boolean") {
+            next[key as SectionKey] = value
+          }
+        }
+        if (Object.keys(next).length > 0) {
+          setSectionVisibility((prev) => ({ ...prev, ...next }))
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to hydrate section preferences", error)
+    } finally {
+      sectionsHydrated.current = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sectionsHydrated.current || typeof window === "undefined") return
+    try {
+      window.localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(sectionVisibility))
+    } catch (error) {
+      console.warn("Failed to persist section preferences", error)
+    }
+  }, [sectionVisibility])
 
   useEffect(() => {
     setVisibleXCounts((prev) => {
@@ -241,13 +276,7 @@ export default function App() {
     await runEcho(query)
   }
 
-  const handleCustomEcho = async () => {
-    if (isFetching) return
-    const success = await runEcho(customQuery)
-    if (success) {
-      setCustomQuery("")
-    }
-  }
+
 
   const loadMoreReddit = (id: string) =>
     setVisibleRedditCounts((prev) => ({
@@ -318,14 +347,15 @@ const loadMoreMarkets = (id: string) =>
                   disabled={isFetching}
                   className="bg-transparent border-white/20 flex-1 min-w-0 text-base sm:text-lg py-3"
                 />
-                <Button
-                  type="button"
-                  onClick={handleCustomEcho}
-                  disabled={isFetching}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-semibold w-full sm:w-auto"
-                >
-                  Echo
-                </Button>
+               <Button
+  type="button"
+  onClick={() => runEcho(customQuery)}
+  disabled={isFetching || !customQuery.trim()}
+  className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-400 text-white font-semibold w-full sm:w-auto flex items-center gap-2"
+>
+  <Waves className="w-5 h-5" />
+  Echo
+</Button>
               </div>
             </div>
           </div>
